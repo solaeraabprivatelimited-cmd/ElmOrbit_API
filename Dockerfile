@@ -11,6 +11,11 @@ RUN apt-get update && apt-get install -y \
     libxext6 \
     libxrender-dev \
     libgomp1 \
+    libopenblas0 \
+    libopenexr-dev \
+    libharfbuzz0b \
+    libwebp6 \
+    libtiff5 \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements
