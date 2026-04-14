@@ -22,29 +22,24 @@ mp_drawing = None
 IMPORT_ERROR = None
 
 try:
-    logger.info("Attempting direct mediaipe.solutions import...")
-    from mediapipe.solutions import pose as mp_pose
-    from mediapipe.solutions import drawing_utils as mp_drawing
-    MP_AVAILABLE = True
-    logger.info("✅ Direct mediaipe.solutions import successful")
-except ImportError as e:
-    IMPORT_ERROR = f"Direct import failed: {e}"
-    logger.warning(IMPORT_ERROR)
-    try:
-        logger.info("Attempting fallback mediapipe.solutions.pose import...")
-        import mediapipe as mp
-        mp_pose = mp.solutions.pose
-        mp_drawing = mp.solutions.drawing_utils
+    # Single unified import
+    import mediapipe
+    logger.info(f"✅ MediaPipe package imported: version {mediapipe.__version__}")
+    logger.info(f"MediaPipe module contents: {dir(mediapipe)}")
+    
+    # Try to access solutions
+    if hasattr(mediapipe, 'solutions'):
+        logger.info("✅ mediapipe.solutions found!")
+        mp_pose = mediapipe.solutions.pose
+        mp_drawing = mediapipe.solutions.drawing_utils
         MP_AVAILABLE = True
-        logger.info("✅ Fallback mediapipe import successful")
-    except (ImportError, AttributeError) as e2:
-        IMPORT_ERROR = f"Both imports failed: Direct: {e} | Fallback: {e2}"
+    else:
+        IMPORT_ERROR = "mediapipe package found but solutions submodule missing"
         logger.error(IMPORT_ERROR)
-        logger.error(f"Python path: {sys.path}")
-        logger.error(f"Installed packages: {', '.join(dir())}")
-        MP_AVAILABLE = False
-        mp_pose = None
-        mp_drawing = None
+        logger.error(f"Available attributes: {[x for x in dir(mediapipe) if not x.startswith('_')]}")
+except Exception as e:
+    IMPORT_ERROR = f"Failed to import mediapipe: {type(e).__name__}: {e}"
+    logger.error(IMPORT_ERROR)
 
 class BehaviorType(Enum):
     NORMAL = "normal"
