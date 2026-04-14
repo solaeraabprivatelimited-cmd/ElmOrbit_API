@@ -1,0 +1,56 @@
+version: '3.8'
+
+services:
+  # Monitoring Server (Edge Device)
+  monitoring:
+    build:
+      context: .
+      dockerfile: Dockerfile.monitoring
+    container_name: lernova-monitoring
+    ports:
+      - "8000:8000"
+    environment:
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
+      - ROOM_ID=${ROOM_ID:-room-001}
+      - CAMERA_RTSP=${CAMERA_RTSP}
+      - CORS_ORIGINS=http://localhost:3000,http://localhost:3001
+      - MONITORING_ENV=production
+    volumes:
+      # Mount camera device (for USB cameras)
+      - /dev/video0:/dev/video0
+      # Optional: Mount local storage for logs
+      - ./monitoring_logs:/app/logs
+    devices:
+      # GPU support (if available)
+      # - /dev/nvidia0:/dev/nvidia0
+      - /dev/video0:/dev/video0
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - lernova-network
+
+  # Optional: Prometheus for metrics (advanced)
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: lernova-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    restart: unless-stopped
+    networks:
+      - lernova-network
+
+networks:
+  lernova-network:
+    driver: bridge
+
+volumes:
+  prometheus_data:
