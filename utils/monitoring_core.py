@@ -10,19 +10,38 @@ from typing import List, Dict, Tuple, Optional
 from enum import Enum
 import math
 from collections import deque
+import logging
+import sys
+
+logger = logging.getLogger(__name__)
 
 # Try multiple import approaches for MediaPipe compatibility
+MP_AVAILABLE = False
+mp_pose = None
+mp_drawing = None
+IMPORT_ERROR = None
+
 try:
+    logger.info("Attempting direct mediaipe.solutions import...")
     from mediapipe.solutions import pose as mp_pose
     from mediapipe.solutions import drawing_utils as mp_drawing
     MP_AVAILABLE = True
-except ImportError:
+    logger.info("✅ Direct mediaipe.solutions import successful")
+except ImportError as e:
+    IMPORT_ERROR = f"Direct import failed: {e}"
+    logger.warning(IMPORT_ERROR)
     try:
+        logger.info("Attempting fallback mediapipe.solutions.pose import...")
         import mediapipe as mp
         mp_pose = mp.solutions.pose
         mp_drawing = mp.solutions.drawing_utils
         MP_AVAILABLE = True
-    except (ImportError, AttributeError):
+        logger.info("✅ Fallback mediapipe import successful")
+    except (ImportError, AttributeError) as e2:
+        IMPORT_ERROR = f"Both imports failed: Direct: {e} | Fallback: {e2}"
+        logger.error(IMPORT_ERROR)
+        logger.error(f"Python path: {sys.path}")
+        logger.error(f"Installed packages: {', '.join(dir())}")
         MP_AVAILABLE = False
         mp_pose = None
         mp_drawing = None
@@ -72,7 +91,9 @@ class PoseDetector:
     
     def __init__(self, model_complexity=1, min_detection_confidence=0.7):
         if not MP_AVAILABLE or mp_pose is None:
-            raise RuntimeError("MediaPipe is not available. Ensure mediapipe package is installed.")
+            raise RuntimeError(
+                f"MediaPipe is not available. Import error: {IMPORT_ERROR}"
+            )
         
         try:
             self.mp_pose = mp_pose
