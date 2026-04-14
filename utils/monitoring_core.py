@@ -172,16 +172,14 @@ class PoseDetector:
                             start_pos = (int(start_kp.x * w), int(start_kp.y * h))
                             end_pos = (int(end_kp.x * w), int(end_kp.y * h))
                             cv2.line(output, start_pos, end_pos, (0, 255, 0), 2)
+                
+                # Draw keypoints (small circles)
+                for kp in skeleton.keypoints:
+                    if kp.confidence > 0.5:
+                        pos = (int(kp.x * w), int(kp.y * h))
+                        cv2.circle(output, pos, 5, (255, 0, 0), -1)
         except AttributeError as e:
             print(f"Warning: Could not draw skeleton connections: {e}")
-        
-        return output
-            
-            # Draw keypoints (small circles)
-            for kp in skeleton.keypoints:
-                if kp.confidence > 0.5:
-                    pos = (int(kp.x * w), int(kp.y * h))
-                    cv2.circle(output, pos, 5, (255, 0, 0), -1)
         
         return output
 
