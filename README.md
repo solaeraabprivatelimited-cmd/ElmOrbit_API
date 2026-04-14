@@ -2,9 +2,9 @@
 
 **Privacy-First Study Room Monitoring System - FastAPI Backend**
 
-| Status | Security | API Version | Tech Stack |
-|--------|----------|-------------|-----------|
-| 🚀 Production Ready | 🔒 Phase 1 Complete | v1.0.0 | FastAPI + MediaPipe + OpenCV |
+| Status              | Security            | API Version | Tech Stack                   |
+| ------------------- | ------------------- | ----------- | ---------------------------- |
+| 🚀 Production Ready | 🔒 Phase 1 Complete | v1.0.0      | FastAPI + MediaPipe + OpenCV |
 
 A secure, high-performance backend service for real-time study room monitoring. Detects person presence, behavioral anomalies, falls, and health emergencies using computer vision and skeletal pose analysis.
 
@@ -13,12 +13,14 @@ A secure, high-performance backend service for real-time study room monitoring. 
 ## ✨ Key Features
 
 ### **Real-Time Monitoring**
+
 - 📍 **Skeletal Pose Detection** - MediaPipe-based keypoint extraction (33 keypoints per person)
 - 🎯 **Multi-Person Tracking** - Track up to 4 occupants per room
 - 📹 **Live Video Processing** - RTSP stream support with adaptive frame rates
 - 🔄 **WebSocket Streaming** - Real-time event push to connected clients
 
 ### **Behavior Analysis & Alerts**
+
 - 🚨 **Fall Detection** - Identifies extreme posture angles (>60°)
 - 🧘 **Posture Monitoring** - Detects unusual/dangerous body positions
 - ⏱️ **Idle Detection** - Alerts when person immobile for extended periods
@@ -27,6 +29,7 @@ A secure, high-performance backend service for real-time study room monitoring. 
 - 🆘 **Health Emergency** - 30-minute no-movement detection
 
 ### **Security & Privacy**
+
 - 🔐 **CORS Restrictions** - Whitelist-based access control
 - 🛡️ **Security Headers** - CSP, HSTS, X-Frame-Options
 - ✅ **Input Validation** - Room IDs and RTSP URLs validated
@@ -68,6 +71,7 @@ A secure, high-performance backend service for real-time study room monitoring. 
 ## 🚀 Quick Start
 
 ### **Prerequisites**
+
 - Python 3.9+
 - pip or conda
 - Supabase account (for database)
@@ -121,9 +125,11 @@ docker-compose -f docker-compose.monitoring.yml up
 ### **Health & Status**
 
 #### `GET /health`
+
 System health check endpoint.
 
 **Response (200 OK):**
+
 ```json
 {
   "status": "healthy",
@@ -136,15 +142,18 @@ System health check endpoint.
 ### **Monitoring Endpoints**
 
 #### `POST /monitoring/init/{room_id}`
+
 Initialize monitoring for a study room.
 
 **Parameters:**
+
 - `room_id` (path) - Unique room identifier (alphanumeric + hyphens, max 100 chars)
 - `camera_rtsp` (query) - RTSP camera URL (e.g., `rtsp://192.168.1.100:554/stream`)
 
 **Rate Limit:** 10 requests/hour
 
 **Response (200 OK):**
+
 ```json
 {
   "room_id": "room-101",
@@ -195,14 +204,14 @@ thresholds = {
 
 ### **Alert Rules**
 
-| Rule | Enabled | Trigger | Level |
-|------|---------|---------|-------|
-| Fall Detection | ✅ | Pose angle > 60° | 🔴 Critical |
-| Unusual Posture | ✅ | Angle > 45° for 10s | 🟠 Medium |
-| Rapid Movement | ✅ | Velocity > 0.3 | 🟠 Medium |
-| Occupancy Exceeded | ✅ | People > 4 | 🟡 High |
-| Loitering | ✅ | Idle > 10 min | 🟠 Medium |
-| No Movement (30min) | ✅ | No activity | 🟡 High |
+| Rule                | Enabled | Trigger             | Level       |
+| ------------------- | ------- | ------------------- | ----------- |
+| Fall Detection      | ✅      | Pose angle > 60°    | 🔴 Critical |
+| Unusual Posture     | ✅      | Angle > 45° for 10s | 🟠 Medium   |
+| Rapid Movement      | ✅      | Velocity > 0.3      | 🟠 Medium   |
+| Occupancy Exceeded  | ✅      | People > 4          | 🟡 High     |
+| Loitering           | ✅      | Idle > 10 min       | 🟠 Medium   |
+| No Movement (30min) | ✅      | No activity         | 🟡 High     |
 
 ---
 
@@ -210,16 +219,16 @@ thresholds = {
 
 ### **Phase 1: Critical Fixes** ✅
 
-| Vulnerability | Solution |
-|---------------|----------|
-| XSS Attacks | Content Security Policy (CSP) |
-| Clickjacking | X-Frame-Options: DENY |
-| MIME Sniffing | X-Content-Type-Options: nosniff |
-| CORS Abuse | Strict origin whitelist |
-| Brute Force | Per-endpoint rate limiting |
-| Info Disclosure | Error message sanitization |
-| Invalid Input | Room ID & URL validation |
-| Man-in-the-Middle | HSTS headers |
+| Vulnerability     | Solution                        |
+| ----------------- | ------------------------------- |
+| XSS Attacks       | Content Security Policy (CSP)   |
+| Clickjacking      | X-Frame-Options: DENY           |
+| MIME Sniffing     | X-Content-Type-Options: nosniff |
+| CORS Abuse        | Strict origin whitelist         |
+| Brute Force       | Per-endpoint rate limiting      |
+| Info Disclosure   | Error message sanitization      |
+| Invalid Input     | Room ID & URL validation        |
+| Man-in-the-Middle | HSTS headers                    |
 
 ### **Request Flow Security**
 
@@ -241,11 +250,11 @@ Response to Client
 
 ### **Rate Limits**
 
-| Endpoint | Limit | Window |
-|----------|-------|--------|
-| `/monitoring/init` | 10 | 1 hour |
-| `/monitoring/process-frame` | 30 | 1 minute |
-| All others | 100 | 1 minute |
+| Endpoint                    | Limit | Window   |
+| --------------------------- | ----- | -------- |
+| `/monitoring/init`          | 10    | 1 hour   |
+| `/monitoring/process-frame` | 30    | 1 minute |
+| All others                  | 100   | 1 minute |
 
 **Exceeding limit:** Returns `429 Too Many Requests`
 
@@ -282,6 +291,7 @@ psutil==5.9.6                   # System metrics
 ```
 
 **Optional GPU Support:**
+
 ```bash
 # NVIDIA GPU
 pip install cupy-cuda12x tensorrt
@@ -297,7 +307,7 @@ pip install tflite-support
 
 ## 📁 Directory Structure
 
-```
+````
 Lernova_API/
 ├── monitoring_server.py           # FastAPI application (main entry point)
 ├── monitoring_requirements.txt     # Python dependencies
@@ -305,12 +315,12 @@ Lernova_API/
 ├── docker-compose.monitoring.yml  # Docker Compose configuration
 ├── .env                          # Environment template (commit to git)
 ├── .env.local                    # Actual credentials (DO NOT COMMIT)
-├── .gitignore                    # Protect .env.local  
+├── .gitignore                    # Protect .env.local
 ├── README.md                     # This file
 ├── SECURITY_AUDIT_PHASE1.md      # Security audit documentation
 ├── STRUCTURE.md                  # Structure overview
 ├── utils/
-│   ├── __init__.py               
+│   ├── __init__.py
 │   ├── monitoring_core.py         # ML engine (MediaPipe + behavior analysis)
 │   └── monitoring_config.py       # Configuration and alert rules
 └── docs/
@@ -344,7 +354,7 @@ python monitoring_server.py
 
 # 6. Test
 curl http://localhost:8000/health
-```
+````
 
 ### Running Tests
 
