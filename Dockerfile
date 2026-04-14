@@ -12,10 +12,9 @@ RUN apt-get update && apt-get install -y \
     libxrender-dev \
     libgomp1 \
     libopenblas0 \
-    libopenexr-dev \
     libharfbuzz0b \
-    libwebp6 \
-    libtiff5 \
+    libwebp7 \
+    libtiff6 \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements
