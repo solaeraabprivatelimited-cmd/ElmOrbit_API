@@ -4,13 +4,28 @@ Core behavior detection engine using MediaPipe and OpenCV
 """
 
 import cv2
-import mediapipe as mp
 import numpy as np
 from dataclasses import dataclass
 from typing import List, Dict, Tuple, Optional
 from enum import Enum
 import math
 from collections import deque
+
+# Try multiple import approaches for MediaPipe compatibility
+try:
+    from mediapipe.solutions import pose as mp_pose
+    from mediapipe.solutions import drawing_utils as mp_drawing
+    MP_AVAILABLE = True
+except ImportError:
+    try:
+        import mediapipe as mp
+        mp_pose = mp.solutions.pose
+        mp_drawing = mp.solutions.drawing_utils
+        MP_AVAILABLE = True
+    except (ImportError, AttributeError):
+        MP_AVAILABLE = False
+        mp_pose = None
+        mp_drawing = None
 
 class BehaviorType(Enum):
     NORMAL = "normal"
@@ -56,24 +71,21 @@ class PoseDetector:
     """MediaPipe-based pose detector (privacy-first skeleton extraction)"""
     
     def __init__(self, model_complexity=1, min_detection_confidence=0.7):
+        if not MP_AVAILABLE or mp_pose is None:
+            raise RuntimeError("MediaPipe is not available. Ensure mediapipe package is installed.")
+        
         try:
-            # Initialize MediaPipe with error handling
-            if not hasattr(mp, 'solutions'):
-                raise RuntimeError("MediaPipe 'solutions' module not accessible. Verify installation.")
-            
-            self.mp_pose = mp.solutions.pose
-            self.pose = self.mp_pose.Pose(
+            self.mp_pose = mp_pose
+            self.pose = mp_pose.Pose(
                 static_image_mode=False,
                 model_complexity=model_complexity,
                 enable_segmentation=False,  # Don't need segmentation for privacy
                 min_detection_confidence=min_detection_confidence
             )
-            self.mp_drawing = mp.solutions.drawing_utils
+            self.mp_drawing = mp_drawing
         except Exception as e:
             raise RuntimeError(
-                f"Failed to initialize MediaPipe PoseDetector: {type(e).__name__}: {str(e)}\n"
-                f"MediaPipe version: {mp.__version__ if hasattr(mp, '__version__') else 'unknown'}\n"
-                f"MediaPipe attributes: {dir(mp)}"
+                f"Failed to initialize MediaPipe Pose: {type(e).__name__}: {str(e)}"
             )
         
     def detect(self, frame: np.ndarray) -> List[PersonSkeleton]:
@@ -158,10 +170,13 @@ class PoseDetector:
         h, w, _ = frame.shape
         output = frame.copy()
         
+        if not MP_AVAILABLE or mp_pose is None:
+            return output
+        
         try:
             for skeleton in skeletons:
                 # Draw connections
-                connections = mp.solutions.pose.POSE_CONNECTIONS
+                connections = mp_pose.POSE_CONNECTIONS
                 for connection in connections:
                     start, end = connection
                     if start < len(skeleton.keypoints) and end < len(skeleton.keypoints):
