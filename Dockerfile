@@ -1,6 +1,6 @@
-FROM python:3.11.9-slim
+FROM python:3.11.9
 
-# Cache-bust timestamp: 2026-04-14T06:22:00Z
+# Cache-bust timestamp: 2026-04-14T06:33:00Z
 # Set working directory
 WORKDIR /app
 
