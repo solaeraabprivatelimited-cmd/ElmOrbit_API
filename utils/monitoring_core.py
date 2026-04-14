@@ -56,14 +56,25 @@ class PoseDetector:
     """MediaPipe-based pose detector (privacy-first skeleton extraction)"""
     
     def __init__(self, model_complexity=1, min_detection_confidence=0.7):
-        self.mp_pose = mp.solutions.pose
-        self.pose = self.mp_pose.Pose(
-            static_image_mode=False,
-            model_complexity=model_complexity,
-            enable_segmentation=False,  # Don't need segmentation for privacy
-            min_detection_confidence=min_detection_confidence
-        )
-        self.mp_drawing = mp.solutions.drawing_utils
+        try:
+            # Initialize MediaPipe with error handling
+            if not hasattr(mp, 'solutions'):
+                raise RuntimeError("MediaPipe 'solutions' module not accessible. Verify installation.")
+            
+            self.mp_pose = mp.solutions.pose
+            self.pose = self.mp_pose.Pose(
+                static_image_mode=False,
+                model_complexity=model_complexity,
+                enable_segmentation=False,  # Don't need segmentation for privacy
+                min_detection_confidence=min_detection_confidence
+            )
+            self.mp_drawing = mp.solutions.drawing_utils
+        except Exception as e:
+            raise RuntimeError(
+                f"Failed to initialize MediaPipe PoseDetector: {type(e).__name__}: {str(e)}\n"
+                f"MediaPipe version: {mp.__version__ if hasattr(mp, '__version__') else 'unknown'}\n"
+                f"MediaPipe attributes: {dir(mp)}"
+            )
         
     def detect(self, frame: np.ndarray) -> List[PersonSkeleton]:
         """
@@ -147,19 +158,24 @@ class PoseDetector:
         h, w, _ = frame.shape
         output = frame.copy()
         
-        for skeleton in skeletons:
-            # Draw connections
-            connections = mp.solutions.pose.POSE_CONNECTIONS
-            for connection in connections:
-                start, end = connection
-                if start < len(skeleton.keypoints) and end < len(skeleton.keypoints):
-                    start_kp = skeleton.keypoints[start]
-                    end_kp = skeleton.keypoints[end]
-                    
-                    if start_kp.confidence > 0.5 and end_kp.confidence > 0.5:
-                        start_pos = (int(start_kp.x * w), int(start_kp.y * h))
-                        end_pos = (int(end_kp.x * w), int(end_kp.y * h))
-                        cv2.line(output, start_pos, end_pos, (0, 255, 0), 2)
+        try:
+            for skeleton in skeletons:
+                # Draw connections
+                connections = mp.solutions.pose.POSE_CONNECTIONS
+                for connection in connections:
+                    start, end = connection
+                    if start < len(skeleton.keypoints) and end < len(skeleton.keypoints):
+                        start_kp = skeleton.keypoints[start]
+                        end_kp = skeleton.keypoints[end]
+                        
+                        if start_kp.confidence > 0.5 and end_kp.confidence > 0.5:
+                            start_pos = (int(start_kp.x * w), int(start_kp.y * h))
+                            end_pos = (int(end_kp.x * w), int(end_kp.y * h))
+                            cv2.line(output, start_pos, end_pos, (0, 255, 0), 2)
+        except AttributeError as e:
+            print(f"Warning: Could not draw skeleton connections: {e}")
+        
+        return output
             
             # Draw keypoints (small circles)
             for kp in skeleton.keypoints:
