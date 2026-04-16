@@ -337,27 +337,27 @@ async def get_room_chat(
     authorization: Optional[str] = Header(None),
     supabase = Depends(get_supabase_client),
 ):
-    """Get room chat messages with sender info"""
+    """Get room chat messages"""
     try:
         user_id = extract_user_id_from_token(authorization)
         
+        # Query messages without JOIN - Supabase FK relationship may not be configured
         response = supabase.table("webrtc_room_messages").select(
-            "*, sender:sender_user_id(id, name, avatar_url)"
+            "id, room_id, sender_user_id, content, created_at"
         ).eq("room_id", room_id).order("created_at", desc=True).limit(limit).execute()
         
         messages = response.data or []
         result = []
         for msg in messages:
-            chat_msg = ChatMessage(**msg)
-            # Ensure sender is properly formatted
-            if msg.get('sender'):
-                sender_data = msg['sender']
-                if isinstance(sender_data, dict):
-                    chat_msg.sender = {
-                        'id': sender_data.get('id'),
-                        'name': sender_data.get('name', 'Unknown'),
-                        'avatar_url': sender_data.get('avatar_url')
-                    }
+            # Construct ChatMessage - sender info will show sender_user_id on frontend
+            chat_msg = ChatMessage(
+                id=msg.get('id'),
+                room_id=msg.get('room_id'),
+                sender_user_id=msg.get('sender_user_id'),
+                content=msg.get('content'),
+                created_at=msg.get('created_at'),
+                sender=None  # Will be populated by frontend fallback
+            )
             result.append(chat_msg)
         return result
     
