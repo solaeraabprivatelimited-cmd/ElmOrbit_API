@@ -316,7 +316,7 @@ async def leave_room(
         # Find participant
         response = supabase.table("webrtc_participants").select("id").eq(
             "room_id", room_id
-        ).eq("user_id", user_id).is_("disconnected_at", "null").execute()
+        ).eq("user_id", user_id).is_("disconnected_at", None).execute()
         
         if not response.data:
             raise HTTPException(status_code=404, detail="Participant not found")
@@ -330,7 +330,7 @@ async def leave_room(
         # Check if any active participants remain in the room
         active_response = supabase.table("webrtc_participants").select("id").eq(
             "room_id", room_id
-        ).is_("disconnected_at", "null").is_("left_at", "null").execute()
+        ).is_("disconnected_at", None).is_("left_at", None).execute()
         
         # If no active participants remain, mark room as empty for cleanup
         if not active_response.data or len(active_response.data) == 0:
@@ -493,10 +493,16 @@ async def options_signal_handler(user_id: str):
 async def get_signal(
     user_id: str,
     request: Request,
+    authorization: Optional[str] = Header(None),
     supabase = Depends(get_supabase_client),
 ):
     """Poll for WebRTC signaling messages (offer, answer, candidates)"""
     try:
+        # Validate authentication
+        auth_user_id = extract_user_id_from_token(authorization)
+        if auth_user_id != user_id:
+            raise HTTPException(status_code=403, detail="Cannot access signals for another user")
+        
         # Extract room_id from query params manually to avoid validation issues with OPTIONS
         room_id = request.query_params.get("roomId") or request.query_params.get("room_id")
         if not room_id:
@@ -505,7 +511,7 @@ async def get_signal(
         # Get pending signals for this user in the room
         response = supabase.table("webrtc_signaling").select("*").eq(
             "to_user_id", user_id
-        ).eq("room_id", room_id).is_("was_processed", "false").order("created_at", desc=True).limit(50).execute()
+        ).eq("room_id", room_id).eq("was_processed", False).order("created_at", desc=True).limit(50).execute()
         
         signals = response.data or []
         
