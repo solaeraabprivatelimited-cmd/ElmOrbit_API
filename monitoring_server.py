@@ -108,6 +108,27 @@ def get_allowed_origins() -> list:
 
 allowed_origins = get_allowed_origins()
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# SECURITY: Early OPTIONS Handler Middleware (runs before CORS validation)
+# Ensures all OPTIONS requests return 200 with CORS headers
+# ═══════════════════════════════════════════════════════════════════════════════
+@app.middleware("http")
+async def handle_options_preflight(request: Request, call_next):
+    """
+    Handle OPTIONS requests early to bypass path validation
+    Returns 200 with CORS headers for all OPTIONS requests
+    """
+    if request.method == "OPTIONS":
+        response = JSONResponse(status_code=200, content={})
+        response.headers["Access-Control-Allow-Origin"] = request.headers.get("origin", "*")
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-CSRF-Token"
+        response.headers["Access-Control-Max-Age"] = "600"
+        return response
+    
+    return await call_next(request)
+
 # ✅ SECURE: CORS middleware with strict restrictions
 app.add_middleware(
     CORSMiddleware,
