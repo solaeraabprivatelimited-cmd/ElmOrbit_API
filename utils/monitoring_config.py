@@ -157,19 +157,44 @@ def get_default_config(room_id: str) -> RoomConfiguration:
 def get_supabase_client():
     """
     ✅ SECURE: Get Supabase client for database operations
-    Uses environment variables for credentials
+    Works in both local development (with .env) and production (with Railway env vars)
     """
     import os
     from supabase import create_client
     from dotenv import load_dotenv
     
-    load_dotenv()
+    # First check if env vars are already set (Railway or manual export)
+    supabase_url = os.getenv("SUPABASE_URL")
+    supabase_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
     
-    supabase_url = os.getenv("SUPABASE_URL", "")
-    supabase_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
-    
+    # If not set, try to load from .env file (local development only)
     if not supabase_url or not supabase_key:
-        raise ValueError("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY environment variables required")
+        load_dotenv()
+        supabase_url = os.getenv("SUPABASE_URL")
+        supabase_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+    
+    if not supabase_url:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error("SUPABASE_URL environment variable is not set. Make sure it's configured in:")
+        logger.error("  - Railway dashboard for production")
+        logger.error("  - .env file for local development")
+        raise ValueError("SUPABASE_URL environment variable required")
+    
+    if not supabase_key:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error("SUPABASE_SERVICE_ROLE_KEY environment variable is not set. Make sure it's configured in:")
+        logger.error("  - Railway dashboard for production")
+        logger.error("  - .env file for local development")
+        raise ValueError("SUPABASE_SERVICE_ROLE_KEY environment variable required")
+    
+    # Validate URL format
+    if not supabase_url.startswith(("http://", "https://")):
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"SUPABASE_URL has invalid format: {supabase_url}")
+        raise ValueError("SUPABASE_URL must start with http:// or https://")
     
     return create_client(supabase_url, supabase_key)
 

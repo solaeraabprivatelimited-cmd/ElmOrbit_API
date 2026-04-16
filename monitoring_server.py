@@ -120,6 +120,32 @@ app.add_middleware(
 )
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# SECURITY: Global Exception Handler
+# Ensures CORS headers are applied even on 500 errors
+# ═══════════════════════════════════════════════════════════════════════════════
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Handle all unhandled exceptions with proper CORS headers and error sanitization"""
+    request_id = str(uuid.uuid4())[:8]
+    error_msg = str(exc)
+    sanitized_msg = sanitize_error_message(error_msg)
+    
+    logger.error(f"[{request_id}] Unhandled exception: {type(exc).__name__}: {error_msg}")
+    
+    response = JSONResponse(
+        status_code=500,
+        content={"detail": sanitized_msg, "request_id": request_id}
+    )
+    
+    # Add CORS headers
+    response.headers["Access-Control-Allow-Origin"] = request.headers.get("origin", "*")
+    response.headers["Access-Control-Allow-Credentials"] = "true"
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-CSRF-Token"
+    
+    return response
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # SECURITY: Request tracking and audit logging
 # ═══════════════════════════════════════════════════════════════════════════════
 @app.middleware("http")

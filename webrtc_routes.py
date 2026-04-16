@@ -73,6 +73,17 @@ class PostChatRequest(BaseModel):
 class SaveNotesRequest(BaseModel):
     content: str = Field(default="", max_length=10000)
 
+class SignalMessage(BaseModel):
+    type: str = Field(..., pattern="^(offer|answer|candidate)$")
+    data: dict = Field(default_factory=dict)
+
+class UpdateParticipantRequest(BaseModel):
+    connection_state: Optional[str] = None
+    is_audio_enabled: Optional[bool] = None
+    is_video_enabled: Optional[bool] = None
+    is_screen_sharing: Optional[bool] = None
+    is_muted: Optional[bool] = None
+
 # ─────────────────────────────────────────────────────────────
 # Helper Functions
 # ─────────────────────────────────────────────────────────────
@@ -427,3 +438,105 @@ async def get_participant(
     except Exception as e:
         logger.error(f"Participant fetch error: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to fetch participant: {str(e)}")
+
+@webrtc_router.get("/signal/{user_id}")
+async def get_signal(
+    user_id: str,
+    room_id: str,
+    supabase = Depends(get_supabase_client),
+):
+    """Poll for WebRTC signaling messages (offer, answer, candidates)"""
+    try:
+        # Get pending signals for this user in the room
+        response = supabase.table("webrtc_signals").select("*").eq(
+            "recipient_user_id", user_id
+        ).eq("room_id", room_id).order("created_at", desc=True).limit(50).execute()
+        
+        signals = response.data or []
+        
+        # Mark signals as read/processed
+        if signals:
+            signal_ids = [s["id"] for s in signals]
+            supabase.table("webrtc_signals").update({
+                "is_processed": True,
+                "processed_at": datetime.utcnow().isoformat(),
+            }).in_("id", signal_ids).execute()
+        
+        logger.debug(f"Returned {len(signals)} signals for user {user_id} in room {room_id}")
+        return {"signals": signals, "count": len(signals)}
+    
+    except Exception as e:
+        logger.error(f"Signal polling error: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to poll signals: {str(e)}")
+
+@webrtc_router.post("/signal/{user_id}")
+async def post_signal(
+    user_id: str,
+    room_id: str,
+    signal: SignalMessage,
+    authorization: Optional[str] = Header(None),
+    supabase = Depends(get_supabase_client),
+):
+    """Send a WebRTC signaling message to a recipient"""
+    try:
+        sender_id = extract_user_id_from_token(authorization)
+        
+        # Store signal in database
+        response = supabase.table("webrtc_signals").insert({
+            "room_id": room_id,
+            "sender_user_id": sender_id,
+            "recipient_user_id": user_id,
+            "signal_type": signal.type,
+            "signal_data": signal.data,
+            "is_processed": False,
+            "created_at": datetime.utcnow().isoformat(),
+        }).execute()
+        
+        logger.debug(f"Signal sent from {sender_id} to {user_id} in room {room_id}")
+        return {"success": True, "signal_id": response.data[0].get("id") if response.data else None}
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Signal send error: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to send signal: {str(e)}")
+
+@webrtc_router.put("/participants/{participant_id}")
+async def update_participant(
+    participant_id: str,
+    request: UpdateParticipantRequest,
+    authorization: Optional[str] = Header(None),
+    supabase = Depends(get_supabase_client),
+):
+    """Update participant status (heartbeat, media state, etc)"""
+    try:
+        user_id = extract_user_id_from_token(authorization)
+        
+        # Build update payload
+        update_data = {
+            "last_heartbeat": datetime.utcnow().isoformat(),
+        }
+        
+        if request.connection_state:
+            update_data["connection_state"] = request.connection_state
+        if request.is_audio_enabled is not None:
+            update_data["is_audio_enabled"] = request.is_audio_enabled
+        if request.is_video_enabled is not None:
+            update_data["is_video_enabled"] = request.is_video_enabled
+        if request.is_screen_sharing is not None:
+            update_data["is_screen_sharing"] = request.is_screen_sharing
+        if request.is_muted is not None:
+            update_data["is_muted"] = request.is_muted
+        
+        response = supabase.table("webrtc_participants").update(update_data).eq(
+            "id", participant_id
+        ).execute()
+        
+        logger.debug(f"Participant {participant_id} updated by {user_id}")
+        return {"success": True, "participant_id": participant_id}
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Participant update error: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to update participant: {str(e)}")
