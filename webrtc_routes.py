@@ -469,7 +469,7 @@ async def get_participant(
 @webrtc_router.get("/signal/{user_id}")
 async def get_signal(
     user_id: str,
-    room_id: str = Query(None, min_length=1),
+    room_id: Optional[str] = Query(None),
     supabase = Depends(get_supabase_client),
 ):
     """Poll for WebRTC signaling messages (offer, answer, candidates)"""
@@ -502,7 +502,7 @@ async def get_signal(
 @webrtc_router.post("/signal/{user_id}")
 async def post_signal(
     user_id: str,
-    room_id: str = Query(None, min_length=1),
+    room_id: Optional[str] = Query(None),
     signal: SignalMessage = None,
     authorization: Optional[str] = Header(None),
     supabase = Depends(get_supabase_client),
