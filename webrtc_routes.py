@@ -278,26 +278,15 @@ async def join_room(
         if not room["is_active"]:
             raise HTTPException(status_code=410, detail="Room is closed")
         
-        # Check if already joined
-        existing = supabase.table("webrtc_participants").select("id").eq(
-            "room_id", room["id"]
-        ).eq("user_id", user_id).is_("disconnected_at", "null").execute()
-        
-        if existing.data:
-            # Rejoin
-            response = supabase.table("webrtc_participants").update({
-                "disconnected_at": None,
-                "connection_state": "connecting",
-                "last_heartbeat": datetime.utcnow().isoformat(),
-            }).eq("id", existing.data[0]["id"]).execute()
-        else:
-            # New participant
-            response = supabase.table("webrtc_participants").insert({
-                "room_id": room["id"],
-                "user_id": user_id,
-                "permissions": "member",
-                "connection_state": "connecting",
-            }).execute()
+        # Upsert participant - handles both new joins and rejoins
+        response = supabase.table("webrtc_participants").upsert({
+            "room_id": room["id"],
+            "user_id": user_id,
+            "permissions": "member",
+            "connection_state": "connecting",
+            "disconnected_at": None,
+            "last_heartbeat": datetime.utcnow().isoformat(),
+        }, on_conflict="room_id,user_id").execute()
         
         logger.info(f"User {user_id} joined room {room['id']}")
         return {"success": True, "room_id": room["id"]}
@@ -499,6 +488,11 @@ async def get_signal(
         logger.error(f"Signal polling error: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to poll signals: {str(e)}")
 
+@webrtc_router.options("/signal/{user_id}")
+async def options_signal(user_id: str):
+    """Handle OPTIONS preflight for signal endpoint"""
+    return {"status": "ok"}
+
 @webrtc_router.post("/signal/{user_id}")
 async def post_signal(
     user_id: str,
@@ -532,6 +526,11 @@ async def post_signal(
     except Exception as e:
         logger.error(f"Signal send error: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to send signal: {str(e)}")
+
+@webrtc_router.options("/signal/{user_id}")
+async def options_signal_endpoint(user_id: str):
+    """Handle OPTIONS preflight for signal endpoint (GET and POST)"""
+    return {"status": "ok"}
 
 @webrtc_router.put("/participants/{participant_id}")
 async def update_participant(
