@@ -4,7 +4,7 @@ Provides room management, participant tracking, and signaling
 Bypasses Supabase Edge Functions ES256 JWT algorithm issues
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Header, Query
+from fastapi import APIRouter, Depends, HTTPException, Header, Query, Request
 from pydantic import BaseModel, Field
 from typing import Optional, List
 from datetime import datetime
@@ -458,11 +458,13 @@ async def get_participant(
 @webrtc_router.get("/signal/{user_id}")
 async def get_signal(
     user_id: str,
-    room_id: Optional[str] = Query(None),
+    request: Request,
     supabase = Depends(get_supabase_client),
 ):
     """Poll for WebRTC signaling messages (offer, answer, candidates)"""
     try:
+        # Extract room_id from query params manually to avoid validation issues with OPTIONS
+        room_id = request.query_params.get("roomId") or request.query_params.get("room_id")
         if not room_id:
             raise HTTPException(status_code=400, detail="roomId query parameter required")
         
@@ -488,21 +490,18 @@ async def get_signal(
         logger.error(f"Signal polling error: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to poll signals: {str(e)}")
 
-@webrtc_router.options("/signal/{user_id}")
-async def options_signal(user_id: str):
-    """Handle OPTIONS preflight for signal endpoint"""
-    return {"status": "ok"}
-
 @webrtc_router.post("/signal/{user_id}")
 async def post_signal(
     user_id: str,
-    room_id: Optional[str] = Query(None),
+    request: Request,
     signal: SignalMessage = None,
     authorization: Optional[str] = Header(None),
     supabase = Depends(get_supabase_client),
 ):
     """Send a WebRTC signaling message to a recipient"""
     try:
+        # Extract room_id from query params manually to avoid validation issues with OPTIONS
+        room_id = request.query_params.get("roomId") or request.query_params.get("room_id")
         if not room_id:
             raise HTTPException(status_code=400, detail="roomId query parameter required")
         
@@ -526,11 +525,6 @@ async def post_signal(
     except Exception as e:
         logger.error(f"Signal send error: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to send signal: {str(e)}")
-
-@webrtc_router.options("/signal/{user_id}")
-async def options_signal_endpoint(user_id: str):
-    """Handle OPTIONS preflight for signal endpoint (GET and POST)"""
-    return {"status": "ok"}
 
 @webrtc_router.put("/participants/{participant_id}")
 async def update_participant(
