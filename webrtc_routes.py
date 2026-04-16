@@ -316,7 +316,7 @@ async def leave_room(
         # Find participant
         response = supabase.table("webrtc_participants").select("id").eq(
             "room_id", room_id
-        ).eq("user_id", user_id).is_("disconnected_at", None).execute()
+        ).eq("user_id", user_id).is_("disconnected_at", "null").execute()
         
         if not response.data:
             raise HTTPException(status_code=404, detail="Participant not found")
@@ -330,7 +330,7 @@ async def leave_room(
         # Check if any active participants remain in the room
         active_response = supabase.table("webrtc_participants").select("id").eq(
             "room_id", room_id
-        ).is_("disconnected_at", None).is_("left_at", None).execute()
+        ).is_("disconnected_at", "null").is_("left_at", "null").execute()
         
         # If no active participants remain, mark room as empty for cleanup
         if not active_response.data or len(active_response.data) == 0:
