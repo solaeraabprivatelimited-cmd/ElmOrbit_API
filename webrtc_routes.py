@@ -343,7 +343,7 @@ async def get_room_chat(
         
         # Query messages without JOIN - Supabase FK relationship may not be configured
         response = supabase.table("webrtc_room_messages").select(
-            "id, room_id, sender_user_id, content, created_at"
+            "id, room_id, sender_user_id, message, created_at"
         ).eq("room_id", room_id).order("created_at", desc=True).limit(limit).execute()
         
         messages = response.data or []
@@ -354,7 +354,7 @@ async def get_room_chat(
                 id=msg.get('id'),
                 room_id=msg.get('room_id'),
                 sender_user_id=msg.get('sender_user_id'),
-                content=msg.get('content'),
+                message=msg.get('message'),
                 created_at=msg.get('created_at'),
                 sender=None  # Will be populated by frontend fallback
             )
