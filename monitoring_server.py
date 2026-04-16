@@ -23,6 +23,7 @@ import time
 # Import monitoring modules
 from utils.monitoring_core import MonitoringEngine, PoseDetector, BehaviorAnalyzer
 from utils.monitoring_config import get_default_config
+from monitoring_routes import router as monitoring_db_router
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # SECURITY: Setup logging with audit trail support
@@ -225,6 +226,11 @@ def validate_rtsp_url(url: str) -> bool:
     if not url or not isinstance(url, str):
         return False
     return url.startswith("rtsp://") or url.startswith("rtsps://")
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Register routers
+# ═══════════════════════════════════════════════════════════════════════════════
+app.include_router(monitoring_db_router)
 
 # ============ Health Check ============
 @app.get("/health")
