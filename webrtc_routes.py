@@ -489,7 +489,7 @@ async def get_signal(
             }).in_("id", signal_ids).execute()
         
         logger.debug(f"Returned {len(signals)} signals for user {user_id} in room {room_id}")
-        return {"signals": signals, "count": len(signals)}
+        return signals
     
     except Exception as e:
         logger.error(f"Signal polling error: {e}")
