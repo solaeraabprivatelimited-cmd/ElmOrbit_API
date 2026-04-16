@@ -114,7 +114,7 @@ app.add_middleware(
     allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["Content-Type", "Authorization", "X-CSRF-Token"],
+    allow_headers=["Content-Type", "Authorization", "X-CSRF-Token", "apikey"],
     expose_headers=["Content-Length", "X-Request-ID"],
     max_age=600,
 )
@@ -135,7 +135,7 @@ async def handle_options_preflight(request: Request, call_next):
         response.headers["Access-Control-Allow-Origin"] = request.headers.get("origin", "*")
         response.headers["Access-Control-Allow-Credentials"] = "true"
         response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
-        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-CSRF-Token"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-CSRF-Token, apikey"
         response.headers["Access-Control-Max-Age"] = "600"
         return response
     
@@ -163,7 +163,7 @@ async def global_exception_handler(request: Request, exc: Exception):
     response.headers["Access-Control-Allow-Origin"] = request.headers.get("origin", "*")
     response.headers["Access-Control-Allow-Credentials"] = "true"
     response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
-    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-CSRF-Token"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-CSRF-Token, apikey"
     
     return response
 
