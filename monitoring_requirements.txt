@@ -18,6 +18,9 @@ python-multipart==0.0.6
 supabase==2.0.3
 python-dotenv==1.0.0
 
+# Scheduling & Background Tasks
+apscheduler==3.10.4
+
 # Processing & Utils
 pillow==10.1.0
 scipy==1.11.4

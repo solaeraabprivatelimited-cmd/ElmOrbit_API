@@ -11,6 +11,7 @@ from datetime import datetime
 import json
 import logging
 from utils.monitoring_config import get_supabase_client
+from background_tasks import background_tasks
 
 logger = logging.getLogger(__name__)
 
@@ -265,11 +266,11 @@ async def join_room(
         user_id = extract_user_id_from_token(authorization)
         
         # Find room
-        room_response = supabase.table("webrtc_rooms").select("id,is_active").eq("id", room_id).execute()
+        room_response = supabase.table("webrtc_rooms").select("id,is_active,emptied_at").eq("id", room_id).execute()
         room = room_response.data[0] if room_response.data else None
         
         if not room:
-            room_response = supabase.table("webrtc_rooms").select("id,is_active").eq("code", room_id.upper()).execute()
+            room_response = supabase.table("webrtc_rooms").select("id,is_active,emptied_at").eq("code", room_id.upper()).execute()
             room = room_response.data[0] if room_response.data else None
         
         if not room:
@@ -287,6 +288,11 @@ async def join_room(
             "disconnected_at": None,
             "last_heartbeat": datetime.utcnow().isoformat(),
         }, on_conflict="room_id,user_id").execute()
+        
+        # If room was marked as empty, unmark it now that someone joined
+        if room.get("emptied_at") is not None:
+            await background_tasks.unmark_room_empty(room["id"])
+            logger.info(f"Room {room['id']} unmarked as empty after participant joined")
         
         logger.info(f"User {user_id} joined room {room['id']}")
         return {"success": True, "room_id": room["id"]}
@@ -320,6 +326,16 @@ async def leave_room(
             "disconnected_at": datetime.utcnow().isoformat(),
             "connection_state": "disconnected",
         }).eq("id", response.data[0]["id"]).execute()
+        
+        # Check if any active participants remain in the room
+        active_response = supabase.table("webrtc_participants").select("id").eq(
+            "room_id", room_id
+        ).is_("disconnected_at", "null").is_("left_at", "null").execute()
+        
+        # If no active participants remain, mark room as empty for cleanup
+        if not active_response.data or len(active_response.data) == 0:
+            await background_tasks.mark_room_empty(room_id)
+            logger.info(f"Room {room_id} marked empty after last participant left")
         
         logger.info(f"User {user_id} left room {room_id}")
         return {"success": True}

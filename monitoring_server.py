@@ -25,6 +25,7 @@ from utils.monitoring_core import MonitoringEngine, PoseDetector, BehaviorAnalyz
 from utils.monitoring_config import get_default_config
 from monitoring_routes import router as monitoring_db_router
 from webrtc_routes import webrtc_router
+from background_tasks import init_background_tasks, shutdown_background_tasks
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # SECURITY: Setup logging with audit trail support
@@ -281,6 +282,23 @@ def validate_rtsp_url(url: str) -> bool:
 # ═══════════════════════════════════════════════════════════════════════════════
 app.include_router(monitoring_db_router)
 app.include_router(webrtc_router)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Startup and Shutdown Events
+# ═══════════════════════════════════════════════════════════════════════════════
+@app.on_event("startup")
+async def startup_event():
+    """Initialize background tasks on application startup"""
+    logger.info("🚀 Starting up Study Room Monitoring API...")
+    init_background_tasks()
+    logger.info("✅ Application startup complete")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Cleanup resources on application shutdown"""
+    logger.info("🛑 Shutting down Study Room Monitoring API...")
+    shutdown_background_tasks()
+    logger.info("✅ Application shutdown complete")
 
 # ============ Health Check ============
 @app.get("/health")
