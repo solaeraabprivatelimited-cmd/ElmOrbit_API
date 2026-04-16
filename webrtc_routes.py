@@ -4,7 +4,7 @@ Provides room management, participant tracking, and signaling
 Bypasses Supabase Edge Functions ES256 JWT algorithm issues
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Header
+from fastapi import APIRouter, Depends, HTTPException, Header, Query
 from pydantic import BaseModel, Field
 from typing import Optional, List
 from datetime import datetime
@@ -287,7 +287,7 @@ async def join_room(
         # Check if already joined
         existing = supabase.table("webrtc_participants").select("id").eq(
             "room_id", room["id"]
-        ).eq("user_id", user_id).is_("disconnected_at", True).execute()
+        ).eq("user_id", user_id).is_("disconnected_at", "null").execute()
         
         if existing.data:
             # Rejoin
@@ -314,6 +314,39 @@ async def join_room(
         logger.error(f"Join room error: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to join room: {str(e)}")
 
+@webrtc_router.post("/rooms/{room_id}/leave")
+async def leave_room(
+    room_id: str,
+    authorization: Optional[str] = Header(None),
+    supabase = Depends(get_supabase_client),
+):
+    """Leave a room as a participant"""
+    try:
+        user_id = extract_user_id_from_token(authorization)
+        
+        # Find participant
+        response = supabase.table("webrtc_participants").select("id").eq(
+            "room_id", room_id
+        ).eq("user_id", user_id).is_("disconnected_at", "null").execute()
+        
+        if not response.data:
+            raise HTTPException(status_code=404, detail="Participant not found")
+        
+        # Mark as disconnected
+        supabase.table("webrtc_participants").update({
+            "disconnected_at": datetime.utcnow().isoformat(),
+            "connection_state": "disconnected",
+        }).eq("id", response.data[0]["id"]).execute()
+        
+        logger.info(f"User {user_id} left room {room_id}")
+        return {"success": True}
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Leave room error: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to leave room: {str(e)}")
+
 @webrtc_router.get("/rooms/{room_id}/chat", response_model=List[ChatMessage])
 async def get_room_chat(
     room_id: str,
@@ -325,7 +358,7 @@ async def get_room_chat(
     try:
         user_id = extract_user_id_from_token(authorization)
         
-        response = supabase.table("webrtc_chat").select(
+        response = supabase.table("webrtc_room_messages").select(
             "*"
         ).eq("room_id", room_id).order("created_at", desc=True).limit(limit).execute()
         
@@ -348,7 +381,7 @@ async def get_room_notes(
     try:
         user_id = extract_user_id_from_token(authorization)
         
-        response = supabase.table("webrtc_notes").select(
+        response = supabase.table("webrtc_room_notes").select(
             "*"
         ).eq("room_id", room_id).order("created_at", desc=True).execute()
         
@@ -372,7 +405,7 @@ async def post_room_chat(
     try:
         user_id = extract_user_id_from_token(authorization)
         
-        response = supabase.table("webrtc_chat").insert({
+        response = supabase.table("webrtc_room_messages").insert({
             "room_id": room_id,
             "sender_user_id": user_id,
             "message": request.message.strip(),
@@ -399,7 +432,7 @@ async def save_room_notes(
     try:
         user_id = extract_user_id_from_token(authorization)
         
-        response = supabase.table("webrtc_notes").upsert({
+        response = supabase.table("webrtc_room_notes").upsert({
             "room_id": room_id,
             "user_id": user_id,
             "content": request.content.strip(),
@@ -442,7 +475,7 @@ async def get_participant(
 @webrtc_router.get("/signal/{user_id}")
 async def get_signal(
     user_id: str,
-    room_id: str,
+    room_id: str = Query(..., min_length=1),
     supabase = Depends(get_supabase_client),
 ):
     """Poll for WebRTC signaling messages (offer, answer, candidates)"""
@@ -472,8 +505,8 @@ async def get_signal(
 @webrtc_router.post("/signal/{user_id}")
 async def post_signal(
     user_id: str,
-    room_id: str,
-    signal: SignalMessage,
+    room_id: str = Query(..., min_length=1),
+    signal: SignalMessage = None,
     authorization: Optional[str] = Header(None),
     supabase = Depends(get_supabase_client),
 ):
