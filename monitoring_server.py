@@ -24,6 +24,7 @@ import time
 from utils.monitoring_core import MonitoringEngine, PoseDetector, BehaviorAnalyzer
 from utils.monitoring_config import get_default_config
 from monitoring_routes import router as monitoring_db_router
+from webrtc_routes import webrtc_router
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # SECURITY: Setup logging with audit trail support
@@ -231,6 +232,7 @@ def validate_rtsp_url(url: str) -> bool:
 # Register routers
 # ═══════════════════════════════════════════════════════════════════════════════
 app.include_router(monitoring_db_router)
+app.include_router(webrtc_router)
 
 # ============ Health Check ============
 @app.get("/health")
