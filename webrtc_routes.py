@@ -138,12 +138,6 @@ async def create_room(
     try:
         user_id = extract_user_id_from_token(authorization)
         
-        # Ensure user exists in profiles table
-        supabase.table("profiles").upsert({
-            "id": user_id,
-            "updated_at": datetime.utcnow().isoformat(),
-        }).execute()
-        
         room_code = generate_room_code()
         
         response = supabase.table("webrtc_rooms").insert({
