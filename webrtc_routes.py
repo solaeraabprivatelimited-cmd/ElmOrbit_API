@@ -469,11 +469,14 @@ async def get_participant(
 @webrtc_router.get("/signal/{user_id}")
 async def get_signal(
     user_id: str,
-    room_id: str = Query(..., min_length=1),
+    room_id: str = Query(None, min_length=1),
     supabase = Depends(get_supabase_client),
 ):
     """Poll for WebRTC signaling messages (offer, answer, candidates)"""
     try:
+        if not room_id:
+            raise HTTPException(status_code=400, detail="roomId query parameter required")
+        
         # Get pending signals for this user in the room
         response = supabase.table("webrtc_signals").select("*").eq(
             "recipient_user_id", user_id
@@ -499,13 +502,16 @@ async def get_signal(
 @webrtc_router.post("/signal/{user_id}")
 async def post_signal(
     user_id: str,
-    room_id: str = Query(..., min_length=1),
+    room_id: str = Query(None, min_length=1),
     signal: SignalMessage = None,
     authorization: Optional[str] = Header(None),
     supabase = Depends(get_supabase_client),
 ):
     """Send a WebRTC signaling message to a recipient"""
     try:
+        if not room_id:
+            raise HTTPException(status_code=400, detail="roomId query parameter required")
+        
         sender_id = extract_user_id_from_token(authorization)
         
         # Store signal in database
