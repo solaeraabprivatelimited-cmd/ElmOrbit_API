@@ -67,6 +67,12 @@ class RoomNote(BaseModel):
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
 
+class PostChatRequest(BaseModel):
+    message: str = Field(..., min_length=1, max_length=2000)
+
+class SaveNotesRequest(BaseModel):
+    content: str = Field(default="", max_length=10000)
+
 # ─────────────────────────────────────────────────────────────
 # Helper Functions
 # ─────────────────────────────────────────────────────────────
@@ -347,7 +353,7 @@ async def get_room_notes(
 @webrtc_router.post("/rooms/{room_id}/chat")
 async def post_room_chat(
     room_id: str,
-    message: str = Field(..., min_length=1, max_length=2000),
+    request: PostChatRequest,
     authorization: Optional[str] = Header(None),
     supabase = Depends(get_supabase_client),
 ):
@@ -358,7 +364,7 @@ async def post_room_chat(
         response = supabase.table("webrtc_chat").insert({
             "room_id": room_id,
             "sender_user_id": user_id,
-            "message": message.strip(),
+            "message": request.message.strip(),
             "created_at": datetime.utcnow().isoformat(),
         }).execute()
         
@@ -374,7 +380,7 @@ async def post_room_chat(
 @webrtc_router.post("/rooms/{room_id}/notes")
 async def save_room_notes(
     room_id: str,
-    content: str = Field(..., min_length=0),
+    request: SaveNotesRequest,
     authorization: Optional[str] = Header(None),
     supabase = Depends(get_supabase_client),
 ):
@@ -385,7 +391,7 @@ async def save_room_notes(
         response = supabase.table("webrtc_notes").upsert({
             "room_id": room_id,
             "user_id": user_id,
-            "content": content.strip(),
+            "content": request.content.strip(),
             "updated_at": datetime.utcnow().isoformat(),
         }).execute()
         
