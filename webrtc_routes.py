@@ -216,7 +216,7 @@ async def get_room(
                 display_name=user.get("name", "Participant"),
                 avatar_url=user.get("avatar_url"),
                 connection_state=p.get("connection_state", "unknown"),
-                permissions=p.get("permissions", "participant"),
+                permissions=p.get("permissions", "member"),
                 joined_at=p.get("joined_at"),
                 disconnected_at=p.get("disconnected_at"),
             ))
@@ -295,7 +295,7 @@ async def join_room(
             response = supabase.table("webrtc_participants").insert({
                 "room_id": room["id"],
                 "user_id": user_id,
-                "permissions": "participant",
+                "permissions": "member",
                 "connection_state": "connecting",
             }).execute()
         
@@ -478,17 +478,17 @@ async def get_signal(
             raise HTTPException(status_code=400, detail="roomId query parameter required")
         
         # Get pending signals for this user in the room
-        response = supabase.table("webrtc_signals").select("*").eq(
-            "recipient_user_id", user_id
-        ).eq("room_id", room_id).order("created_at", desc=True).limit(50).execute()
+        response = supabase.table("webrtc_signaling").select("*").eq(
+            "to_user_id", user_id
+        ).eq("room_id", room_id).is_("was_processed", "false").order("created_at", desc=True).limit(50).execute()
         
         signals = response.data or []
         
-        # Mark signals as read/processed
+        # Mark signals as processed
         if signals:
             signal_ids = [s["id"] for s in signals]
-            supabase.table("webrtc_signals").update({
-                "is_processed": True,
+            supabase.table("webrtc_signaling").update({
+                "was_processed": True,
                 "processed_at": datetime.utcnow().isoformat(),
             }).in_("id", signal_ids).execute()
         
@@ -515,14 +515,13 @@ async def post_signal(
         sender_id = extract_user_id_from_token(authorization)
         
         # Store signal in database
-        response = supabase.table("webrtc_signals").insert({
+        response = supabase.table("webrtc_signaling").insert({
             "room_id": room_id,
-            "sender_user_id": sender_id,
-            "recipient_user_id": user_id,
+            "from_user_id": sender_id,
+            "to_user_id": user_id,
             "signal_type": signal.type,
-            "signal_data": signal.data,
-            "is_processed": False,
-            "created_at": datetime.utcnow().isoformat(),
+            "payload": signal.data,
+            "was_processed": False,
         }).execute()
         
         logger.debug(f"Signal sent from {sender_id} to {user_id} in room {room_id}")
