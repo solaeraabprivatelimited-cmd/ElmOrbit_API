@@ -455,6 +455,11 @@ async def get_participant(
         logger.error(f"Participant fetch error: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to fetch participant: {str(e)}")
 
+@webrtc_router.options("/signal/{user_id}")
+async def options_signal_handler(user_id: str):
+    """Handle OPTIONS preflight for signal endpoint - no dependencies to avoid 400 errors"""
+    return {}
+
 @webrtc_router.get("/signal/{user_id}")
 async def get_signal(
     user_id: str,
