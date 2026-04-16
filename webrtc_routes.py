@@ -337,16 +337,29 @@ async def get_room_chat(
     authorization: Optional[str] = Header(None),
     supabase = Depends(get_supabase_client),
 ):
-    """Get room chat messages"""
+    """Get room chat messages with sender info"""
     try:
         user_id = extract_user_id_from_token(authorization)
         
         response = supabase.table("webrtc_room_messages").select(
-            "*"
+            "*, sender:sender_user_id(id, name, avatar_url)"
         ).eq("room_id", room_id).order("created_at", desc=True).limit(limit).execute()
         
         messages = response.data or []
-        return [ChatMessage(**msg) for msg in messages]
+        result = []
+        for msg in messages:
+            chat_msg = ChatMessage(**msg)
+            # Ensure sender is properly formatted
+            if msg.get('sender'):
+                sender_data = msg['sender']
+                if isinstance(sender_data, dict):
+                    chat_msg.sender = {
+                        'id': sender_data.get('id'),
+                        'name': sender_data.get('name', 'Unknown'),
+                        'avatar_url': sender_data.get('avatar_url')
+                    }
+            result.append(chat_msg)
+        return result
     
     except HTTPException:
         raise
