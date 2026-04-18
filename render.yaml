@@ -1,7 +1,36 @@
 services:
   - type: web
-    name: lernova-monitoring
-    env: docker
+    name: lernova-api
+    runtime: docker
+    region: oregon
+    plan: free
+
+    # GitHub Auto-Deploy Configuration
+    repo: https://github.com/your-username/Lernova_API.git
+    branch: main
+    autoDeploy: true
+
+    # Docker Configuration
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+
+    # Environment Variables
+    # ⚠️ Set SECRET values in Render Dashboard, not here
     envVars:
+      - key: SUPABASE_URL
+        value: https://your-project.supabase.co
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: CORS_ORIGINS
+        value: https://app.elmorbit.co.in,http://localhost:5173
       - key: PORT
-        value: 8000
+        value: "8000"
+
+    # Health Check (UptimeRobot will monitor this)
+    healthCheckPath: /health
+    healthCheckInterval: 30
+
+    # Auto-Restart Policy
+    restartPolicy: always
