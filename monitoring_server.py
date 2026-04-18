@@ -23,8 +23,7 @@ import time
 # Import monitoring modules
 from utils.monitoring_core import MonitoringEngine, PoseDetector, BehaviorAnalyzer
 from utils.monitoring_config import get_default_config
-from monitoring_routes import router as monitoring_db_router
-from webrtc_routes import webrtc_router
+from routes import router as unified_router
 from background_tasks import init_background_tasks, shutdown_background_tasks
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -280,8 +279,7 @@ def validate_rtsp_url(url: str) -> bool:
 # ═══════════════════════════════════════════════════════════════════════════════
 # Register routers
 # ═══════════════════════════════════════════════════════════════════════════════
-app.include_router(monitoring_db_router)
-app.include_router(webrtc_router)
+app.include_router(unified_router)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Startup and Shutdown Events
