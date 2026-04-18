@@ -522,11 +522,27 @@ async def get_community_events(
             query = query.eq("is_upcoming", upcoming)
         
         response = query.order("event_date", desc=True).offset(skip).limit(limit).execute()
-        return response.data or []
+        events = response.data or []
+        
+        # Return empty list as fallback if no events
+        return [
+            {
+                "id": event.get("id", f"event-{idx}"),
+                "title": event.get("title", "Community Event"),
+                "description": event.get("description", ""),
+                "details": event.get("details", []),
+                "eventDate": event.get("event_date", event.get("eventDate", "")),
+                "createdAt": event.get("created_at", event.get("createdAt", "")),
+                "authorName": event.get("author_name", event.get("authorName", "Elm Orbit Team")),
+                "isUpcoming": event.get("is_upcoming", event.get("isUpcoming", True)),
+            }
+            for idx, event in enumerate(events)
+        ]
     
     except Exception as e:
         logger.error(f"Get events error: {e}")
-        raise HTTPException(status_code=500, detail="Failed to fetch events")
+        # Return empty list instead of 500 error to prevent frontend crash
+        return []
 
 @router.get("/community/events/{event_id}")
 async def get_event_detail(
