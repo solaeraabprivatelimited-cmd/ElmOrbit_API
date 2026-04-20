@@ -6,7 +6,7 @@ services:
     plan: free
 
     # GitHub Auto-Deploy Configuration
-    repo: https://github.com/your-username/Lernova_API.git
+    repo: https://github.com/solaeraabprivatelimited-cmd/ElmOrbit_API.git
     branch: main
     autoDeploy: true
 
