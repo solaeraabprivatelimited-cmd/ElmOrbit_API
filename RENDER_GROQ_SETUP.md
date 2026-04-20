@@ -1,9 +1,11 @@
 # Render Backend - GROQ_API_KEY Setup (REQUIRED)
 
 ## Critical Issue
+
 Your backend on Render is **missing the GROQ_API_KEY** environment variable. This prevents the AI Mentor endpoint from working.
 
 **Evidence:**
+
 - Frontend CORS: ✅ Working (verified with preflight tests)
 - Backend response: ❌ Failing (no Groq API key to call LLM)
 - Error in browser: `"Cannot read properties of undefined (reading 'payload')"`
@@ -11,7 +13,9 @@ Your backend on Render is **missing the GROQ_API_KEY** environment variable. Thi
 ## Immediate Fix (2 minutes)
 
 ### Step 1: Get Your Groq API Key
+
 Your local `.env` file contains:
+
 ```
 GROQ_API_KEY=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
 ```
@@ -34,6 +38,7 @@ Copy this key (or get a new one from https://console.groq.com).
 ### Step 3: Verify Deployment
 
 Check Render dashboard:
+
 - Green checkmark ✅ = Ready to serve requests
 - If still deploying, wait for completion
 
@@ -67,19 +72,25 @@ curl -X POST "https://elmorbit-api.onrender.com/api/ai-mentor/chat" \
 ## Troubleshooting
 
 ### Issue: Still getting "Cannot read properties of undefined"
-**Solution:** 
+
+**Solution:**
+
 - Verify Render deployment completed (check dashboard status)
 - Wait 30-60 seconds after deployment shows "Ready"
 - Hard refresh browser cache again
 
 ### Issue: "AI mentor service unavailable"
+
 **Solution:**
+
 - Check Render logs: Dashboard → Logs
 - Look for error message about Groq API
 - Verify the API key was entered correctly (no extra spaces)
 
 ### Issue: Render keeps redeploying
+
 **Solution:**
+
 - This is normal after setting env variable
 - Wait for status to show "Ready" (green checkmark)
 - Stop redeploys in Settings if needed
@@ -94,6 +105,7 @@ curl -X POST "https://elmorbit-api.onrender.com/api/ai-mentor/chat" \
 ## Summary
 
 **Status After GROQ_API_KEY is set:**
+
 - Frontend: `https://lernova-alpha.vercel.app` → ✅ Makes API calls
 - Backend: `https://elmorbit-api.onrender.com` → ✅ Has Groq key
 - CORS: ✅ Already configured
