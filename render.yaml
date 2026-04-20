@@ -15,13 +15,18 @@ services:
     dockerContext: .
 
     # Environment Variables
-    # ⚠️ Set SECRET values in Render Dashboard, not here
+    # ⚠️ IMPORTANT: Set these REQUIRED SECRET values in Render Dashboard, not here
+    # 1. GROQ_API_KEY - Get from https://console.groq.com
+    # 2. SUPABASE_SERVICE_ROLE_KEY - From Supabase dashboard
+    # 3. SUPABASE_ANON_KEY - From Supabase dashboard (public key is safe here)
     envVars:
       - key: SUPABASE_URL
-        value: https://your-project.supabase.co
+        value: https://evtvzmherkrahjsxdddi.supabase.co
       - key: SUPABASE_SERVICE_ROLE_KEY
         sync: false
       - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: GROQ_API_KEY
         sync: false
       - key: CORS_ORIGINS
         value: https://lernova-alpha.vercel.app,https://app.elmorbit.co.in,http://localhost:5173
