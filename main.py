@@ -827,7 +827,18 @@ async def handle_options_preflight(request: Request, call_next):
         response.headers["Access-Control-Max-Age"] = "600"
         return response
     
-    return await call_next(request)
+    response = await call_next(request)
+    
+    # Ensure CORS headers are added to ALL responses (fallback for CORSMiddleware)
+    origin = request.headers.get("origin")
+    if origin and origin in allowed_origins:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-CSRF-Token, apikey"
+        response.headers["Access-Control-Expose-Headers"] = "Content-Length, X-Request-ID"
+    
+    return response
 
 
 @app.exception_handler(Exception)
