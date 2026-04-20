@@ -2186,7 +2186,7 @@ async def ai_mentor_chat(
         # Call Groq API
         try:
             completion = groq.chat.completions.create(
-                model="mixtral-8x7b-32768",  # Fast, unlimited inference model
+                model="llama-3.1-8b-instant",  # Fast, lightweight model for real-time chat
                 messages=messages,
                 max_tokens=1024,
                 temperature=0.7,
@@ -2262,7 +2262,7 @@ async def ai_mentor_stream(
             
             # Stream from Groq
             completion = groq.chat.completions.create(
-                model="mixtral-8x7b-32768",
+                model="llama-3.1-8b-instant",
                 messages=messages,
                 max_tokens=1024,
                 temperature=0.7,
