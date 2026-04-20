@@ -1576,6 +1576,201 @@ async def send_reaction(
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# SECTION 11: AI MENTOR ENDPOINTS (from Groq Backend Integration)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class AiMentorRequest(BaseModel):
+    message: str = Field(..., min_length=1, max_length=2000)
+    history: Optional[List[Dict[str, str]]] = Field(default=[], description="Conversation history")
+    type: Optional[str] = Field(default="explanation", description="Type of response: explanation, mood-checkin, etc.")
+    stream: Optional[bool] = Field(default=False, description="Whether to stream the response")
+
+
+class AiMentorResponse(BaseModel):
+    response: str
+    timestamp: str
+
+
+# Initialize Groq client (lazy-load on first use)
+_groq_client = None
+
+
+def get_groq_client():
+    """Get or initialize Groq client"""
+    global _groq_client
+    if _groq_client is None:
+        try:
+            from groq import Groq
+            groq_api_key = os.getenv("GROQ_API_KEY")
+            if not groq_api_key:
+                logger.warning("⚠️ GROQ_API_KEY not set - AI mentor features disabled")
+                return None
+            
+            _groq_client = Groq(api_key=groq_api_key)
+            logger.info("✅ Groq client initialized")
+        except ImportError:
+            logger.warning("⚠️ Groq SDK not installed - Install with: pip install groq")
+            return None
+        except Exception as e:
+            logger.error(f"✗ Failed to initialize Groq client: {e}")
+            return None
+    
+    return _groq_client
+
+
+@app.post("/api/ai-mentor/chat", response_model=AiMentorResponse)
+async def ai_mentor_chat(
+    request: AiMentorRequest,
+    query_type: str = Query("explanation", description="Type of AI response"),
+    stream: bool = Query(False, description="Stream the response"),
+):
+    """AI Mentor Chat Endpoint - Get responses from Groq LLM"""
+    try:
+        groq = get_groq_client()
+        if not groq:
+            raise HTTPException(
+                status_code=503,
+                detail="AI mentor service unavailable - Groq API not configured"
+            )
+        
+        # Build system prompt based on type
+        if query_type == "mood-checkin":
+            system_prompt = (
+                "You are an empathetic AI wellness assistant. Help the student reflect on their emotional state. "
+                "Ask clarifying questions, validate their feelings, and suggest healthy coping strategies. "
+                "Keep responses brief and supportive."
+            )
+        elif query_type == "explanation":
+            system_prompt = (
+                "You are an expert educational tutor. Explain concepts clearly and concisely. "
+                "Break down complex topics into simple steps. Provide examples when helpful. "
+                "Encourage deep understanding over memorization."
+            )
+        else:
+            system_prompt = (
+                "You are a helpful study companion. Assist students with learning, answering questions, "
+                "and providing academic guidance. Be supportive and encouraging."
+            )
+        
+        # Format conversation history for Groq
+        messages = []
+        
+        # Add system message
+        messages.append({
+            "role": "system",
+            "content": system_prompt
+        })
+        
+        # Add conversation history
+        if request.history:
+            for msg in request.history:
+                if isinstance(msg, dict) and "role" in msg and "content" in msg:
+                    messages.append(msg)
+        
+        # Add current user message
+        messages.append({
+            "role": "user",
+            "content": request.message
+        })
+        
+        # Call Groq API
+        try:
+            completion = groq.chat.completions.create(
+                model="mixtral-8x7b-32768",  # Fast, unlimited inference model
+                messages=messages,
+                max_tokens=1024,
+                temperature=0.7,
+            )
+            
+            response_text = completion.choices[0].message.content
+            
+            return AiMentorResponse(
+                response=response_text,
+                timestamp=datetime.utcnow().isoformat()
+            )
+        
+        except Exception as groq_error:
+            logger.error(f"Groq API error: {groq_error}")
+            # Provide fallback response
+            fallback_message = (
+                "I apologize, but I'm having trouble processing your request right now. "
+                "Please try again in a moment, or rephrase your question."
+            )
+            return AiMentorResponse(
+                response=fallback_message,
+                timestamp=datetime.utcnow().isoformat()
+            )
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"AI mentor endpoint error: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to process AI mentor request"
+        )
+
+
+@app.post("/api/ai-mentor/stream")
+async def ai_mentor_stream(
+    request: AiMentorRequest,
+    query_type: str = Query("explanation"),
+):
+    """Streaming version of AI mentor chat"""
+    async def generate():
+        try:
+            groq = get_groq_client()
+            if not groq:
+                yield '{"error": "AI mentor service unavailable"}\n'
+                return
+            
+            # Build system prompt
+            if query_type == "mood-checkin":
+                system_prompt = (
+                    "You are an empathetic AI wellness assistant. Help the student reflect on their emotional state. "
+                    "Keep responses brief and supportive."
+                )
+            elif query_type == "explanation":
+                system_prompt = (
+                    "You are an expert educational tutor. Explain concepts clearly and concisely. "
+                    "Break down complex topics into simple steps."
+                )
+            else:
+                system_prompt = "You are a helpful study companion."
+            
+            messages = [{"role": "system", "content": system_prompt}]
+            
+            if request.history:
+                for msg in request.history:
+                    if isinstance(msg, dict) and "role" in msg and "content" in msg:
+                        messages.append(msg)
+            
+            messages.append({
+                "role": "user",
+                "content": request.message
+            })
+            
+            # Stream from Groq
+            completion = groq.chat.completions.create(
+                model="mixtral-8x7b-32768",
+                messages=messages,
+                max_tokens=1024,
+                temperature=0.7,
+                stream=True,
+            )
+            
+            for chunk in completion:
+                if chunk.choices[0].delta.content:
+                    yield chunk.choices[0].delta.content
+        
+        except Exception as e:
+            logger.error(f"Stream error: {e}")
+            yield f"Error: {str(e)}"
+    
+    return StreamingResponse(generate(), media_type="text/plain")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # SECTION 12: STARTUP & SHUTDOWN EVENTS
 # ═══════════════════════════════════════════════════════════════════════════════
 
