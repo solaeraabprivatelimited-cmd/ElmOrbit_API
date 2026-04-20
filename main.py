@@ -90,6 +90,15 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 load_dotenv()
 
+# Import notification service for multi-channel alerts
+try:
+    from notification_service import NotificationService, trigger_alert, AlertPayload, AlertSeverity, NotificationChannel
+    NOTIFICATION_SERVICE_AVAILABLE = True
+    logger.info("✅ Notification Service loaded - Email/SMS/Webhook alerts enabled")
+except ImportError as e:
+    NOTIFICATION_SERVICE_AVAILABLE = False
+    logger.warning(f"⚠️ Notification Service not available: {e} - In-app alerts only")
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # SECTION 1: CONFIGURATION & MONITORING SETUP
 # ═══════════════════════════════════════════════════════════════════════════════
