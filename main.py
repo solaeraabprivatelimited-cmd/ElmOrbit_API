@@ -817,7 +817,7 @@ app.add_middleware(
 
 @app.middleware("http")
 async def handle_options_preflight(request: Request, call_next):
-    """Handle OPTIONS requests"""
+    """Handle OPTIONS requests and add CORS headers to all responses"""
     if request.method == "OPTIONS":
         response = JSONResponse(status_code=200, content={})
         response.headers["Access-Control-Allow-Origin"] = request.headers.get("origin", "*")
@@ -829,9 +829,9 @@ async def handle_options_preflight(request: Request, call_next):
     
     response = await call_next(request)
     
-    # Ensure CORS headers are added to ALL responses (fallback for CORSMiddleware)
+    # Add CORS headers to all responses (ensures compatibility with CORSMiddleware)
     origin = request.headers.get("origin")
-    if origin and origin in allowed_origins:
+    if origin:
         response.headers["Access-Control-Allow-Origin"] = origin
         response.headers["Access-Control-Allow-Credentials"] = "true"
         response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
