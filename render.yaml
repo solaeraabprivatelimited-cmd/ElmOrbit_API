@@ -24,7 +24,7 @@ services:
       - key: SUPABASE_ANON_KEY
         sync: false
       - key: CORS_ORIGINS
-        value: https://app.elmorbit.co.in,http://localhost:5173
+        value: https://lernova-alpha.vercel.app,https://app.elmorbit.co.in,http://localhost:5173
       - key: PORT
         value: "8000"
 
