@@ -96,7 +96,7 @@ cp .env.example .env
 # Edit .env with your Supabase and CORS credentials
 
 # Run server
-python monitoring_server.py
+python main.py
 ```
 
 Server starts at `http://localhost:8000`
@@ -105,17 +105,17 @@ Server starts at `http://localhost:8000`
 
 ```bash
 # Build image
-docker build -f Dockerfile.monitoring -t lernova-monitoring .
+docker build -t lernova-api .
 
 # Run container
 docker run -p 8000:8000 \
   -e SUPABASE_URL="your-url" \
-  -e SUPABASE_KEY="your-key" \
+  -e SUPABASE_SERVICE_ROLE_KEY="your-key" \
   -e CORS_ORIGINS="http://localhost:3000" \
-  lernova-monitoring
+  lernova-api
 
 # Or use Docker Compose
-docker-compose -f docker-compose.monitoring.yml up
+docker-compose up
 ```
 
 ---
@@ -309,23 +309,22 @@ pip install tflite-support
 
 ````
 Lernova_API/
-├── monitoring_server.py           # FastAPI application (main entry point)
+├── main.py                        # FastAPI application (2,500+ lines - complete app)
+├── security.py                    # Security layer (1,200+ lines - auth & validation)
 ├── monitoring_requirements.txt     # Python dependencies
-├── Dockerfile.monitoring          # Docker build file
-├── docker-compose.monitoring.yml  # Docker Compose configuration
-├── .env                          # Environment template (commit to git)
-├── .env.local                    # Actual credentials (DO NOT COMMIT)
-├── .gitignore                    # Protect .env.local
-├── README.md                     # This file
-├── SECURITY_AUDIT_PHASE1.md      # Security audit documentation
-├── STRUCTURE.md                  # Structure overview
-├── utils/
-│   ├── __init__.py
-│   ├── monitoring_core.py         # ML engine (MediaPipe + behavior analysis)
-│   └── monitoring_config.py       # Configuration and alert rules
+├── Dockerfile                     # Docker build file (production-ready)
+├── docker-compose.yml             # Docker Compose configuration
+├── .env.example                   # Environment variables template
+├── .gitignore                     # Protect .env and secrets
+├── README.md                      # This file
+├── BACKEND_GUIDE.md               # Complete implementation documentation
+├── DEPLOY_RENDER.md               # Render free tier deployment guide
+├── API_DOCUMENTATION.md           # API reference
+├── DEPLOYMENT_GUIDE.md            # General deployment guidelines
+├── STRUCTURE.md                   # Project structure overview
 └── docs/
-    ├── VERCEL_CLOUD_DEPLOYMENT.md # Complete cloud hosting guide
-    └── MONITORING_SETUP.md        # Local development setup
+    ├── MONITORING_SETUP.md        # Local development setup
+    └── VERCEL_CLOUD_DEPLOYMENT.md # Vercel deployment guide
 
 ---
 
@@ -350,7 +349,7 @@ cp .env .env.local
 # Edit .env.local with your credentials
 
 # 5. Run development server
-python monitoring_server.py
+python main.py
 
 # 6. Test
 curl http://localhost:8000/health
@@ -360,90 +359,71 @@ curl http://localhost:8000/health
 
 ```bash
 # Check linting
-pylint monitoring_server.py utils/
+pylint main.py security.py
 
 # Type checking
-mypy monitoring_server.py
+mypy main.py security.py
 
 # Run security audit
-python -m bandit monitoring_server.py
+python -m bandit main.py security.py
 ```
 
 ---
 
 ## 🚀 Deployment Options
 
-### Option 1: Railway (Recommended) ⭐
+### Option 1: Render (FREE TIER RECOMMENDED) ⭐
+
+**Complete guide:** See `DEPLOY_RENDER.md`
 
 ```bash
-# 1. Install Railway CLI
-npm install -g @railway/cli
-# or: brew install railway
-
-# 2. Login
-railway login
-
-# 3. Create project
-railway init
-
-# 4. Add variables to Railway dashboard
-SUPABASE_URL=your-url
-SUPABASE_SERVICE_ROLE_KEY=your-key
-CORS_ORIGINS=https://your-railway-domain.com
-
-# 5. Deploy
-railway up
-```
-
-**Railway will auto-detect `requirements.txt` and deploy!**
-
-- Start: Free tier ($5/month)
-- Auto-scaling: Yes
-- Domain: Included
-- Monitoring: Built-in
-
-### Option 2: Render
-
-```bash
-# 1. Connect GitHub repository to Render
-# 2. Create new Web Service
-# 3. Connect repo and select automatic deployment
-# 4. Set environment variables
-SUPABASE_URL=...
-SUPABASE_SERVICE_ROLE_KEY=...
-
+# Quick start:
+# 1. Push to GitHub: git push origin main
+# 2. Go to https://render.com → New Web Service
+# 3. Connect repository
+# 4. Add 5 environment variables
 # 5. Deploy (auto-deploys on git push)
 ```
 
-### Option 3: Heroku
+**Features:**
+
+- ✅ FREE tier available
+- ✅ Automatic from GitHub
+- ✅ Auto-restart included
+- ⚠️ Spins down after 15 min (use UptimeRobot to keep alive)
+
+### Option 2: Railway
 
 ```bash
-# 1. Install Heroku CLI
-# 2. Login
-heroku login
+# 1. Install Railway CLI: npm install -g @railway/cli
+# 2. railway login
+# 3. railway init
+# 4. Set environment variables in dashboard
+# 5. railway up
+```
 
-# 3. Create app
+- Cost: $5/month or pay-as-you-go
+- Auto-scaling: Yes
+- Good for production
+
+### Option 3: Heroku (Legacy)
+
+```bash
+# Heroku now requires paid dyno (deprecated free tier)
 heroku create your-app-name
-
-# 4. Set variables
 heroku config:set SUPABASE_URL=your-url
-heroku config:set SUPABASE_SERVICE_ROLE_KEY=your-key
-
-# 5. Deploy
 git push heroku main
 ```
 
-### Option 4: Docker (Any Cloud)
+### Option 4: Docker (Self-Hosted)
 
 ```bash
-# Build Docker image
-docker build -f Dockerfile.monitoring -t lernova-api .
-
-# Push to Docker Hub
+# Build and push
+docker build -t lernova-api .
 docker tag lernova-api your-username/lernova-api
 docker push your-username/lernova-api
 
-# Deploy anywhere: AWS ECS, Google Cloud Run, Microsoft Azure, etc.
+# Deploy to: AWS ECS, Google Cloud Run, Azure Container Instances, etc.
 ```
 
 ---
@@ -507,10 +487,12 @@ wscat -c ws://localhost:8000/ws/monitoring/room-001
 
 ## 📚 Documentation
 
-- **Deployment**: See `docs/VERCEL_CLOUD_DEPLOYMENT.md`
+- **Quick Deploy (FREE)**: See `DEPLOY_RENDER.md` ⭐
+- **Complete Backend Guide**: See `BACKEND_GUIDE.md`
+- **API Reference**: See `API_DOCUMENTATION.md`
+- **General Deployment**: See `DEPLOYMENT_GUIDE.md`
 - **Local Setup**: See `docs/MONITORING_SETUP.md`
-- **API Docs**: Run server and visit `/docs`
-- **Configuration**: Edit `utils/monitoring_config.py`
+- **Live API Docs**: Run server and visit `http://localhost:8000/docs`
 
 ---
 
@@ -522,6 +504,9 @@ wscat -c ws://localhost:8000/ws/monitoring/room-001
 # Ensure you're in Lernova_API directory
 cd Lernova_API
 
+# Activate virtual environment
+source venv/bin/activate  # Windows: venv\Scripts\activate
+
 # Reinstall dependencies
 pip install -r monitoring_requirements.txt
 ```
@@ -530,10 +515,11 @@ pip install -r monitoring_requirements.txt
 
 ```bash
 # Use different port
-python monitoring_server.py --port 8001
+uvicorn main:app --port 8001
 
 # Or find and kill process
-lsof -i :8000
+lsof -i :8000      # Mac/Linux
+netstat -ano | findstr :8000  # Windows
 kill -9 <PID>
 ```
 
@@ -548,11 +534,15 @@ ffmpeg -rtsp_transport tcp -i rtsp://camera-ip/stream
 
 ---
 
-## 📞 Support
+## 📞 Support & Docs
 
-- Docs: See `docs/` folder
-- Issues: Check troubleshooting above
-- Deployment: Follow VERCEL_CLOUD_DEPLOYMENT.md
+| Need                   | File                       | Purpose                           |
+| ---------------------- | -------------------------- | --------------------------------- |
+| **Deploy to cloud**    | `DEPLOY_RENDER.md`         | Step-by-step Render deployment    |
+| **Full backend docs**  | `BACKEND_GUIDE.md`         | Complete implementation guide     |
+| **API reference**      | `API_DOCUMENTATION.md`     | All endpoints documented          |
+| **Local development**  | `docs/MONITORING_SETUP.md` | Development environment setup     |
+| **General deployment** | `DEPLOYMENT_GUIDE.md`      | Deployment checklist & strategies |
 
 ---
 
