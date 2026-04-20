@@ -1,0 +1,15 @@
+.env
+.env.*
+.git
+.gitignore
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+docs/
+*.md
+pre-deploy-check.*
+test_*.py
+verify_integration.py
+docker-compose*.yml
+supabase/.temp/
