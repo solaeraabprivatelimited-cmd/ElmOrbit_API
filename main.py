@@ -34,6 +34,7 @@ import string
 import time
 import uuid
 import math
+import httpx
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, List, Set, Tuple, Any
 from enum import Enum
@@ -720,6 +721,16 @@ class SaveNotesRequest(BaseModel):
     content: str = Field(default="", max_length=10000)
 
 
+class RoomNoteEntryRequest(BaseModel):
+    heading: str = Field(default="Untitled note", max_length=160)
+    body: str = Field(default="", max_length=20000)
+
+
+class WebRTCSignalRequest(BaseModel):
+    type: str = Field(..., min_length=1, max_length=50)
+    data: Dict[str, Any]
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # SECTION 5: FASTAPI APP & MIDDLEWARE SETUP
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -962,6 +973,126 @@ def validate_room_id(room_id: str) -> bool:
     return bool(re.match(r'^[a-zA-Z0-9_-]+$', room_id))
 
 
+def resolve_room(supabase, room_identifier: str, columns: str = "*") -> dict:
+    """Resolve a room by UUID or public room code."""
+    if not validate_room_id(room_identifier):
+        raise HTTPException(status_code=400, detail="Invalid room ID format")
+
+    room = None
+    is_room_code = room_identifier.upper().startswith(("STUDY-", "WEBRTC-"))
+    if not is_room_code:
+        try:
+            response = supabase.table("webrtc_rooms").select(columns).eq("id", room_identifier).execute()
+            room = response.data[0] if response.data else None
+        except Exception as e:
+            logger.warning(f"Room id lookup failed, trying code lookup: {e}")
+
+    if not room:
+        response = supabase.table("webrtc_rooms").select(columns).eq("code", room_identifier.upper()).execute()
+        room = response.data[0] if response.data else None
+
+    if not room:
+        raise HTTPException(status_code=404, detail="Room not found")
+
+    return room
+
+
+def ensure_room_member(supabase, room_identifier: str, user_id: str) -> str:
+    """Ensure the authenticated user is an active room member."""
+    room = resolve_room(supabase, room_identifier, "id")
+    membership = supabase.table("webrtc_participants").select("id").eq(
+        "room_id", room["id"]
+    ).eq("user_id", user_id).is_("disconnected_at", "null").execute()
+
+    if not membership.data:
+        raise HTTPException(status_code=403, detail="Join the room before accessing this resource")
+
+    return room["id"]
+
+
+def sync_profile_row(supabase, user_id: str):
+    """Keep a minimal profile row present for room joins created through the API."""
+    try:
+        supabase.table("profiles").upsert({"id": user_id}, on_conflict="id").execute()
+    except Exception as e:
+        logger.warning(f"Profile sync skipped for {user_id}: {e}")
+
+
+def get_room_with_participants(supabase, room_identifier: str) -> dict:
+    room = resolve_room(supabase, room_identifier)
+    participant_response = supabase.table("webrtc_participants").select(
+        "id,user_id,is_pinned,is_muted,is_video_enabled,is_audio_enabled,"
+        "is_screen_sharing,permissions,connection_state,joined_at,disconnected_at,last_heartbeat"
+    ).eq("room_id", room["id"]).execute()
+
+    participants = participant_response.data or []
+    user_ids = list({participant["user_id"] for participant in participants if participant.get("user_id")})
+    profile_map = {}
+
+    if user_ids:
+        try:
+            profiles = supabase.table("profiles").select("id,name,avatar_url").in_("id", user_ids).execute()
+            profile_map = {
+                profile["id"]: {
+                    "name": profile.get("name") or "Participant",
+                    "avatar_url": profile.get("avatar_url"),
+                }
+                for profile in (profiles.data or [])
+            }
+        except Exception as e:
+            logger.warning(f"Participant profile enrichment skipped: {e}")
+
+    room["participants"] = [
+        {
+            **participant,
+            "display_name": profile_map.get(participant.get("user_id"), {}).get(
+                "name",
+                str(participant.get("user_id") or "Participant")[:8],
+            ),
+            "avatar_url": profile_map.get(participant.get("user_id"), {}).get("avatar_url"),
+        }
+        for participant in participants
+    ]
+    return room
+
+
+async def call_supabase_function(function_name: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Proxy legacy Supabase Edge Functions from the API service."""
+    supabase_url = os.getenv("SUPABASE_URL", "").rstrip("/")
+    function_key = (
+        os.getenv("SUPABASE_ANON_KEY")
+        or os.getenv("SUPABASE_KEY")
+        or os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+    )
+
+    if not supabase_url or not function_key:
+        raise HTTPException(status_code=500, detail="Supabase function configuration missing")
+
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        response = await client.post(
+            f"{supabase_url}/functions/v1/{function_name}",
+            headers={
+                "Content-Type": "application/json",
+                "apikey": function_key,
+                "Authorization": f"Bearer {function_key}",
+            },
+            json=payload,
+        )
+
+    try:
+        body = response.json()
+    except Exception:
+        body = {"error": response.text}
+
+    if response.status_code >= 400:
+        raise HTTPException(
+            status_code=response.status_code,
+            detail=body.get("error") or body.get("message") or "Supabase function request failed",
+        )
+
+    return body
+
+
 def validate_rtsp_url(url: str) -> bool:
     """Validate RTSP URL format"""
     if not url or not isinstance(url, str):
@@ -989,6 +1120,30 @@ async def health_check(request: Request):
             status_code=500,
             content={"error": "An error occurred", "request_id": request.state.request_id}
         )
+
+
+@app.post("/auth/request-signup-otp")
+async def request_signup_otp(payload: Dict[str, Any]):
+    """Send signup OTP through the backend API boundary."""
+    return await call_supabase_function("send-signup-otp", payload)
+
+
+@app.post("/auth/verify-auth-otp")
+async def verify_auth_otp(payload: Dict[str, Any]):
+    """Verify signup/password reset OTP through the backend API boundary."""
+    return await call_supabase_function("verify-auth-otp", payload)
+
+
+@app.post("/auth/request-password-reset-code")
+async def request_password_reset_code(payload: Dict[str, Any]):
+    """Send password reset OTP through the backend API boundary."""
+    return await call_supabase_function("send-password-reset-code", payload)
+
+
+@app.post("/auth/send-2fa-otp")
+async def send_two_factor_otp(payload: Dict[str, Any]):
+    """Send two-factor OTP through the backend API boundary."""
+    return await call_supabase_function("send-2fa-otp", payload)
 
 
 @app.post("/monitoring/init/{room_id}")
@@ -1283,7 +1438,7 @@ async def save_skeleton_snapshot(
 # SECTION 9: WEBRTC ENDPOINTS (from routes.py)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-@app.post("/webrtc/rooms", response_model=Room, status_code=201)
+@app.post("/webrtc/rooms", status_code=201)
 async def create_room(
     request: CreateRoomRequest,
     authorization: Optional[str] = Header(None),
@@ -1292,6 +1447,7 @@ async def create_room(
     """Create a new WebRTC study room"""
     try:
         user_id = extract_user_id(authorization)
+        sync_profile_row(supabase, user_id)
         room_code = generate_room_code()
         
         response = supabase.table("webrtc_rooms").insert({
@@ -1318,13 +1474,32 @@ async def create_room(
         }).execute()
         
         logger.info(f"Room created: {room['id']} by {user_id}")
-        return Room(**room)
+        return get_room_with_participants(supabase, room["id"])
     
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Room creation error: {e}")
         raise HTTPException(status_code=500, detail="Failed to create room")
+
+
+@app.get("/webrtc/rooms")
+async def list_rooms(
+    authorization: Optional[str] = Header(None),
+    supabase = Depends(get_supabase_client),
+):
+    """List active WebRTC rooms."""
+    try:
+        extract_user_id(authorization)
+        response = supabase.table("webrtc_rooms").select("*").eq(
+            "is_active", True
+        ).order("created_at", desc=True).execute()
+        return response.data or []
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Room list error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to list rooms")
 
 
 @app.get("/webrtc/rooms/{room_id}")
@@ -1334,17 +1509,7 @@ async def get_room(
 ):
     """Get room details"""
     try:
-        room_response = supabase.table("webrtc_rooms").select("*").eq("id", room_id).execute()
-        room = room_response.data[0] if room_response.data else None
-        
-        if not room:
-            room_response = supabase.table("webrtc_rooms").select("*").eq("code", room_id.upper()).execute()
-            room = room_response.data[0] if room_response.data else None
-        
-        if not room:
-            raise HTTPException(status_code=404, detail="Room not found")
-        
-        return room
+        return get_room_with_participants(supabase, room_id)
     
     except HTTPException:
         raise
@@ -1362,29 +1527,71 @@ async def join_room(
     """Join a room"""
     try:
         user_id = extract_user_id(authorization)
+        sync_profile_row(supabase, user_id)
         
-        room_response = supabase.table("webrtc_rooms").select("id,is_active").eq("id", room_id).execute()
-        room = room_response.data[0] if room_response.data else None
-        
-        if not room:
-            room_response = supabase.table("webrtc_rooms").select("id,is_active").eq("code", room_id.upper()).execute()
-            room = room_response.data[0] if room_response.data else None
-        
-        if not room:
-            raise HTTPException(status_code=404, detail="Room not found")
+        room = resolve_room(supabase, room_id, "id,is_active,max_participants")
         
         if not room["is_active"]:
             raise HTTPException(status_code=410, detail="Room is closed")
+
+        active_by_user = supabase.table("webrtc_participants").select(
+            "id,room_id,last_heartbeat,joined_at"
+        ).eq("user_id", user_id).is_("disconnected_at", "null").execute()
+
+        now = datetime.utcnow()
+        stale_ids = []
+        fresh_rows = []
+        for participant in (active_by_user.data or []):
+            heartbeat = participant.get("last_heartbeat") or participant.get("joined_at")
+            heartbeat_at = datetime.fromisoformat(str(heartbeat).replace("Z", "+00:00")).replace(tzinfo=None) if heartbeat else now
+            if heartbeat_at < now - timedelta(seconds=40):
+                stale_ids.append(participant["id"])
+            else:
+                fresh_rows.append(participant)
+
+        if stale_ids:
+            supabase.table("webrtc_participants").update({
+                "disconnected_at": now.isoformat(),
+                "connection_state": "disconnected",
+            }).in_("id", stale_ids).execute()
+
+        same_room_session = next((p for p in fresh_rows if p.get("room_id") == room["id"]), None)
+        if same_room_session:
+            raise HTTPException(status_code=409, detail="ALREADY_JOINED_THIS_ROOM")
+
+        other_room_session = next((p for p in fresh_rows if p.get("room_id") != room["id"]), None)
+        if other_room_session:
+            raise HTTPException(status_code=409, detail="ALREADY_IN_ANOTHER_ROOM")
+
+        active_count = supabase.table("webrtc_participants").select(
+            "id", count="exact"
+        ).eq("room_id", room["id"]).is_("disconnected_at", "null").execute()
+        if (active_count.count or 0) >= min(room.get("max_participants") or 20, 20):
+            raise HTTPException(status_code=409, detail="Room is full")
+
+        existing = supabase.table("webrtc_participants").select("id,disconnected_at").eq(
+            "room_id", room["id"]
+        ).eq("user_id", user_id).execute()
+
+        if existing.data:
+            row_id = existing.data[0]["id"]
+            response = supabase.table("webrtc_participants").update({
+                "disconnected_at": None,
+                "left_at": None,
+                "connection_state": "connecting",
+                "last_heartbeat": now.isoformat(),
+            }).eq("id", row_id).execute()
+            return (response.data or [{"success": True, "room_id": room["id"]}])[0]
         
-        supabase.table("webrtc_participants").upsert({
+        response = supabase.table("webrtc_participants").insert({
             "room_id": room["id"],
             "user_id": user_id,
             "permissions": "member",
             "connection_state": "connecting",
-        }, on_conflict="room_id,user_id").execute()
+        }).execute()
         
         logger.info(f"User {user_id} joined room {room['id']}")
-        return {"success": True, "room_id": room["id"]}
+        return (response.data or [{"success": True, "room_id": room["id"]}])[0]
     
     except HTTPException:
         raise
@@ -1402,8 +1609,9 @@ async def leave_room(
     """Leave a room"""
     try:
         user_id = extract_user_id(authorization)
+        room = resolve_room(supabase, room_id, "id")
         
-        response = supabase.table("webrtc_participants").select("id").eq("room_id", room_id).eq("user_id", user_id).execute()
+        response = supabase.table("webrtc_participants").select("id").eq("room_id", room["id"]).eq("user_id", user_id).execute()
         
         if response.data:
             supabase.table("webrtc_participants").update({
@@ -1411,12 +1619,103 @@ async def leave_room(
                 "connection_state": "disconnected",
             }).eq("id", response.data[0]["id"]).execute()
         
-        logger.info(f"User {user_id} left room {room_id}")
+        logger.info(f"User {user_id} left room {room['id']}")
         return {"success": True}
     
     except Exception as e:
         logger.error(f"Leave room error: {e}")
         raise HTTPException(status_code=500, detail="Failed to leave room")
+
+
+@app.put("/webrtc/rooms/{room_id}/close")
+async def close_room(
+    room_id: str,
+    authorization: Optional[str] = Header(None),
+    supabase = Depends(get_supabase_client),
+):
+    """Close a room. Only the room host can close it."""
+    try:
+        user_id = extract_user_id(authorization)
+        room = resolve_room(supabase, room_id, "id,host_id")
+        if room["host_id"] != user_id:
+            raise HTTPException(status_code=403, detail="Only host can close room")
+
+        supabase.table("webrtc_rooms").update({
+            "is_active": False,
+            "closed_at": datetime.utcnow().isoformat(),
+            "updated_by": user_id,
+        }).eq("id", room["id"]).execute()
+        return {"success": True, "message": "Room closed"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Close room error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to close room")
+
+
+@app.put("/webrtc/participants/{participant_id}")
+async def update_room_participant(
+    participant_id: str,
+    updates: Dict[str, Any],
+    authorization: Optional[str] = Header(None),
+    supabase = Depends(get_supabase_client),
+):
+    """Update participant media/state fields through the API boundary."""
+    try:
+        user_id = extract_user_id(authorization)
+        participant_response = supabase.table("webrtc_participants").select(
+            "room_id,user_id"
+        ).eq("id", participant_id).execute()
+        participant = participant_response.data[0] if participant_response.data else None
+        if not participant:
+            raise HTTPException(status_code=404, detail="Participant not found")
+
+        room = resolve_room(supabase, participant["room_id"], "id,host_id")
+        if room["host_id"] != user_id and participant["user_id"] != user_id:
+            raise HTTPException(status_code=403, detail="Permission denied")
+
+        allowed = {
+            "is_pinned", "is_muted", "is_video_enabled", "is_audio_enabled",
+            "is_screen_sharing", "permissions", "connection_state", "last_heartbeat",
+        }
+        normalized_updates = {key: value for key, value in updates.items() if key in allowed}
+        if "is_video_off" in updates and "is_video_enabled" not in normalized_updates:
+            normalized_updates["is_video_enabled"] = not bool(updates["is_video_off"])
+        normalized_updates["last_heartbeat"] = normalized_updates.get(
+            "last_heartbeat", datetime.utcnow().isoformat()
+        )
+
+        response = supabase.table("webrtc_participants").update(
+            normalized_updates
+        ).eq("id", participant_id).execute()
+        return (response.data or [{"success": True}])[0]
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Update participant error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update participant")
+
+
+@app.get("/webrtc/rooms/{room_id}/chat")
+async def get_room_chat_messages(
+    room_id: str,
+    limit: int = Query(100, ge=1, le=200),
+    authorization: Optional[str] = Header(None),
+    supabase = Depends(get_supabase_client),
+):
+    """Get recent room chat messages."""
+    try:
+        user_id = extract_user_id(authorization)
+        canonical_room_id = ensure_room_member(supabase, room_id, user_id)
+        response = supabase.table("webrtc_room_messages").select(
+            "id,room_id,sender_user_id,message,created_at"
+        ).eq("room_id", canonical_room_id).order("created_at", desc=True).limit(limit).execute()
+        return list(reversed(response.data or []))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Chat fetch error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch messages")
 
 
 @app.post("/webrtc/rooms/{room_id}/chat")
@@ -1429,46 +1728,246 @@ async def post_room_chat(
     """Post message to chat"""
     try:
         user_id = extract_user_id(authorization)
+        canonical_room_id = ensure_room_member(supabase, room_id, user_id)
         
-        supabase.table("webrtc_room_messages").insert({
-            "room_id": room_id,
+        response = supabase.table("webrtc_room_messages").insert({
+            "room_id": canonical_room_id,
             "sender_user_id": user_id,
             "message": request.message.strip(),
             "created_at": datetime.utcnow().isoformat(),
         }).execute()
         
-        logger.info(f"Message posted to room {room_id}")
-        return {"success": True}
+        logger.info(f"Message posted to room {canonical_room_id}")
+        return (response.data or [{"success": True}])[0]
     
     except Exception as e:
         logger.error(f"Chat post error: {e}")
         raise HTTPException(status_code=500, detail="Failed to post message")
 
 
-@app.post("/webrtc/rooms/{room_id}/notes")
-async def save_room_notes(
+@app.get("/webrtc/rooms/{room_id}/notes/me")
+async def get_my_room_note(
+    room_id: str,
+    authorization: Optional[str] = Header(None),
+    supabase = Depends(get_supabase_client),
+):
+    """Get the authenticated user's legacy single room note."""
+    try:
+        user_id = extract_user_id(authorization)
+        canonical_room_id = ensure_room_member(supabase, room_id, user_id)
+
+        response = supabase.table("webrtc_room_notes").select(
+            "id,room_id,user_id,content,created_at,updated_at"
+        ).eq("room_id", canonical_room_id).eq("user_id", user_id).execute()
+        note = response.data[0] if response.data else None
+        if note:
+            return note
+
+        return {
+            "id": None,
+            "room_id": canonical_room_id,
+            "user_id": user_id,
+            "content": "",
+            "created_at": None,
+            "updated_at": None,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Note fetch error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch notes")
+
+
+@app.put("/webrtc/rooms/{room_id}/notes/me")
+async def save_my_room_note(
     room_id: str,
     request: SaveNotesRequest,
     authorization: Optional[str] = Header(None),
     supabase = Depends(get_supabase_client),
 ):
-    """Save room notes"""
+    """Save the authenticated user's legacy single room note."""
     try:
         user_id = extract_user_id(authorization)
-        
-        supabase.table("webrtc_room_notes").upsert({
-            "room_id": room_id,
+        canonical_room_id = ensure_room_member(supabase, room_id, user_id)
+
+        response = supabase.table("webrtc_room_notes").upsert({
+            "room_id": canonical_room_id,
             "user_id": user_id,
-            "content": request.content.strip(),
+            "content": request.content,
+            "updated_at": datetime.utcnow().isoformat(),
+        }, on_conflict="room_id,user_id").execute()
+
+        return (response.data or [{"success": True}])[0]
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Note save error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to save notes")
+
+
+@app.get("/webrtc/rooms/{room_id}/notes")
+async def list_room_note_entries(
+    room_id: str,
+    authorization: Optional[str] = Header(None),
+    supabase = Depends(get_supabase_client),
+):
+    """List structured room notes for the authenticated user."""
+    try:
+        user_id = extract_user_id(authorization)
+        canonical_room_id = ensure_room_member(supabase, room_id, user_id)
+        response = supabase.table("webrtc_room_note_entries").select(
+            "id,room_id,user_id,heading,body,created_at,updated_at"
+        ).eq("room_id", canonical_room_id).eq("user_id", user_id).order(
+            "updated_at", desc=True
+        ).execute()
+        return response.data or []
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Structured note list error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to list notes")
+
+
+@app.post("/webrtc/rooms/{room_id}/notes")
+async def create_room_note_entry(
+    room_id: str,
+    request: RoomNoteEntryRequest,
+    authorization: Optional[str] = Header(None),
+    supabase = Depends(get_supabase_client),
+):
+    """Create a structured room note for the authenticated user."""
+    try:
+        user_id = extract_user_id(authorization)
+        canonical_room_id = ensure_room_member(supabase, room_id, user_id)
+        response = supabase.table("webrtc_room_note_entries").insert({
+            "room_id": canonical_room_id,
+            "user_id": user_id,
+            "heading": request.heading.strip() or "Untitled note",
+            "body": request.body,
             "updated_at": datetime.utcnow().isoformat(),
         }).execute()
-        
-        logger.info(f"Notes saved for room {room_id}")
-        return {"success": True}
-    
+        return (response.data or [None])[0]
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Notes save error: {e}")
-        raise HTTPException(status_code=500, detail="Failed to save notes")
+        logger.error(f"Structured note create error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to create note")
+
+
+@app.put("/webrtc/rooms/{room_id}/notes/{note_id}")
+async def update_room_note_entry(
+    room_id: str,
+    note_id: str,
+    request: RoomNoteEntryRequest,
+    authorization: Optional[str] = Header(None),
+    supabase = Depends(get_supabase_client),
+):
+    """Update a structured room note for the authenticated user."""
+    try:
+        user_id = extract_user_id(authorization)
+        canonical_room_id = ensure_room_member(supabase, room_id, user_id)
+        response = supabase.table("webrtc_room_note_entries").update({
+            "heading": request.heading.strip() or "Untitled note",
+            "body": request.body,
+            "updated_at": datetime.utcnow().isoformat(),
+        }).eq("id", note_id).eq("room_id", canonical_room_id).eq("user_id", user_id).execute()
+        note = response.data[0] if response.data else None
+        if not note:
+            raise HTTPException(status_code=404, detail="Note not found")
+        return note
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Structured note update error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update note")
+
+
+@app.delete("/webrtc/rooms/{room_id}/notes/{note_id}")
+async def delete_room_note_entry(
+    room_id: str,
+    note_id: str,
+    authorization: Optional[str] = Header(None),
+    supabase = Depends(get_supabase_client),
+):
+    """Delete a structured room note for the authenticated user."""
+    try:
+        user_id = extract_user_id(authorization)
+        canonical_room_id = ensure_room_member(supabase, room_id, user_id)
+        response = supabase.table("webrtc_room_note_entries").delete().eq(
+            "id", note_id
+        ).eq("room_id", canonical_room_id).eq("user_id", user_id).execute()
+        if not response.data:
+            raise HTTPException(status_code=404, detail="Note not found")
+        return {"success": True, "deleted_note_id": note_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Structured note delete error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to delete note")
+
+
+@app.post("/webrtc/signal/{to_user_id}")
+async def send_webrtc_signal(
+    to_user_id: str,
+    signal: WebRTCSignalRequest,
+    roomId: str = Query(...),
+    authorization: Optional[str] = Header(None),
+    supabase = Depends(get_supabase_client),
+):
+    """Store a WebRTC signaling event for another room participant."""
+    try:
+        from_user_id = extract_user_id(authorization)
+        canonical_room_id = ensure_room_member(supabase, roomId, from_user_id)
+        ensure_room_member(supabase, canonical_room_id, to_user_id)
+
+        response = supabase.table("webrtc_signaling").insert({
+            "room_id": canonical_room_id,
+            "from_user_id": from_user_id,
+            "to_user_id": to_user_id,
+            "signal_type": signal.type,
+            "payload": signal.data,
+        }).execute()
+        return (response.data or [{"success": True}])[0]
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"WebRTC signal send error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to send signal")
+
+
+@app.get("/webrtc/signal/{user_id}")
+async def get_webrtc_signals(
+    user_id: str,
+    roomId: str = Query(...),
+    authorization: Optional[str] = Header(None),
+    supabase = Depends(get_supabase_client),
+):
+    """Fetch pending WebRTC signaling events for the authenticated user."""
+    try:
+        auth_user_id = extract_user_id(authorization)
+        if auth_user_id != user_id:
+            raise HTTPException(status_code=403, detail="Permission denied")
+
+        canonical_room_id = ensure_room_member(supabase, roomId, auth_user_id)
+        response = supabase.table("webrtc_signaling").select(
+            "id,room_id,from_user_id,to_user_id,signal_type,payload,created_at"
+        ).eq("room_id", canonical_room_id).eq("to_user_id", auth_user_id).eq(
+            "was_processed", False
+        ).order("created_at", desc=False).limit(100).execute()
+
+        signal_ids = [signal["id"] for signal in (response.data or [])]
+        if signal_ids:
+            supabase.table("webrtc_signaling").update({
+                "was_processed": True,
+                "processed_at": datetime.utcnow().isoformat(),
+            }).in_("id", signal_ids).execute()
+
+        return response.data or []
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"WebRTC signal fetch error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch signals")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

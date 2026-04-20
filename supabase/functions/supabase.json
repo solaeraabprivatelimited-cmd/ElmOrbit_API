@@ -1,0 +1,8 @@
+{
+  "functions": [
+    {
+      "key": "server",
+      "verify_jwt": false
+    }
+  ]
+}
