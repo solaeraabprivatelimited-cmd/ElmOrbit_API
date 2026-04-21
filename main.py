@@ -736,8 +736,31 @@ class WebRTCSignalRequest(BaseModel):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Error Sanitization
+# Error Codes & Sanitization
 # ─────────────────────────────────────────────────────────────────────────────
+
+class ErrorCode:
+    VALIDATION_ERROR = "VALIDATION_ERROR"
+    AUTH_ERROR = "AUTH_ERROR"
+    PERMISSION_ERROR = "PERMISSION_ERROR"
+    NOT_FOUND = "NOT_FOUND"
+    CONFLICT = "CONFLICT"
+    RATE_LIMIT = "RATE_LIMIT"
+    SERVER_ERROR = "SERVER_ERROR"
+    THIRD_PARTY_ERROR = "THIRD_PARTY_ERROR"
+    NETWORK_ERROR = "NETWORK_ERROR"
+
+HTTP_STATUS_TO_CODE = {
+    400: ErrorCode.VALIDATION_ERROR,
+    401: ErrorCode.AUTH_ERROR,
+    403: ErrorCode.PERMISSION_ERROR,
+    404: ErrorCode.NOT_FOUND,
+    409: ErrorCode.CONFLICT,
+    410: ErrorCode.NOT_FOUND,
+    429: ErrorCode.RATE_LIMIT,
+    500: ErrorCode.SERVER_ERROR,
+    503: ErrorCode.THIRD_PARTY_ERROR,
+}
 
 ERROR_SANITIZATION_MAP = {
     "invalid or expired token": "Authentication failed",
@@ -754,12 +777,48 @@ ERROR_SANITIZATION_MAP = {
 
 
 def sanitize_error_message(error_msg: str) -> str:
-    """Sanitize error messages"""
+    """Sanitize error messages for production — never expose internals."""
     error_lower = error_msg.lower()
     for pattern, safe_msg in ERROR_SANITIZATION_MAP.items():
         if pattern in error_lower:
             return safe_msg
     return "An error occurred"
+
+
+def make_error_response(
+    code: str,
+    message: str,
+    status_code: int = 500,
+    details: Optional[Dict[str, Any]] = None,
+    request_id: Optional[str] = None,
+) -> JSONResponse:
+    """Build a standardized error response body."""
+    content: Dict[str, Any] = {
+        "success": False,
+        "error": {
+            "code": code,
+            "message": message,
+            "details": details or {},
+            "timestamp": datetime.utcnow().isoformat(),
+        },
+    }
+    if request_id:
+        content["error"]["request_id"] = request_id
+    return JSONResponse(status_code=status_code, content=content)
+
+
+def raise_api_error(
+    status_code: int,
+    message: str,
+    code: Optional[str] = None,
+    details: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Raise an HTTPException with a standardized detail payload."""
+    resolved_code = code or HTTP_STATUS_TO_CODE.get(status_code, ErrorCode.SERVER_ERROR)
+    raise HTTPException(
+        status_code=status_code,
+        detail={"code": resolved_code, "message": message, "details": details or {}},
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -841,25 +900,47 @@ async def handle_options_preflight(request: Request, call_next):
     return response
 
 
-@app.exception_handler(Exception)
-async def global_exception_handler(request: Request, exc: Exception):
-    """Global exception handler"""
-    request_id = str(uuid.uuid4())[:8]
-    error_msg = str(exc)
-    sanitized_msg = sanitize_error_message(error_msg)
-    
-    logger.error(f"[{request_id}] Unhandled exception: {type(exc).__name__}: {error_msg}")
-    
-    response = JSONResponse(
-        status_code=500,
-        content={"detail": sanitized_msg, "request_id": request_id}
-    )
-    
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    """Standardized HTTP exception handler — always returns the strict error envelope."""
+    request_id = getattr(request.state, "request_id", str(uuid.uuid4())[:8])
+    detail = exc.detail
+
+    # If the detail is already our structured dict, use it directly
+    if isinstance(detail, dict) and "code" in detail:
+        code = detail["code"]
+        message = detail.get("message", sanitize_error_message(str(detail)))
+        details = detail.get("details", {})
+    else:
+        raw = str(detail) if detail else ""
+        code = HTTP_STATUS_TO_CODE.get(exc.status_code, ErrorCode.SERVER_ERROR)
+        message = sanitize_error_message(raw) if raw else "An error occurred"
+        details = {}
+
+    logger.warning(f"[{request_id}] HTTP {exc.status_code} {code}: {message}")
+
+    response = make_error_response(code, message, exc.status_code, details, request_id)
     response.headers["Access-Control-Allow-Origin"] = request.headers.get("origin", "*")
     response.headers["Access-Control-Allow-Credentials"] = "true"
-    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
-    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-CSRF-Token, apikey"
-    
+    return response
+
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Catch-all — never expose stack traces in production."""
+    request_id = getattr(request.state, "request_id", str(uuid.uuid4())[:8])
+    error_msg = str(exc)
+
+    logger.error(f"[{request_id}] Unhandled {type(exc).__name__}: {error_msg}", exc_info=True)
+
+    response = make_error_response(
+        ErrorCode.SERVER_ERROR,
+        "An unexpected error occurred. Please try again.",
+        500,
+        request_id=request_id,
+    )
+    response.headers["Access-Control-Allow-Origin"] = request.headers.get("origin", "*")
+    response.headers["Access-Control-Allow-Credentials"] = "true"
     return response
 
 
@@ -1227,9 +1308,12 @@ async def process_frame(room_id: str, file: UploadFile = File(...), request: Req
             "events": result["events"],
             "timestamp": datetime.now().isoformat()
         }
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error processing frame: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        error_id = str(uuid.uuid4())[:8]
+        logger.error(f"[{error_id}] Error processing frame: {str(e)}")
+        raise HTTPException(status_code=500, detail={"code": ErrorCode.SERVER_ERROR, "message": "Frame processing failed", "details": {}})
 
 
 @app.websocket("/ws/monitoring/{room_id}")
