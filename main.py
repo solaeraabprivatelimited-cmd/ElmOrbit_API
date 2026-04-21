@@ -91,6 +91,9 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 load_dotenv()
 
+# Import error handling infrastructure
+from error_handler import register_error_handlers, AppError, ErrorCode
+
 # Import notification service for multi-channel alerts
 try:
     from notification_service import NotificationService, trigger_alert, AlertPayload, AlertSeverity, NotificationChannel
@@ -869,6 +872,13 @@ app.add_middleware(
     expose_headers=["Content-Length", "X-Request-ID"],
     max_age=600,
 )
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Error Handling Registration
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Register global error handler for all unhandled exceptions
+register_error_handlers(app)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Middleware
