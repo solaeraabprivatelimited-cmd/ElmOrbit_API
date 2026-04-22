@@ -127,7 +127,28 @@ serve(async (req: Request) => {
         });
       }
 
-      return new Response(JSON.stringify({ success: true, data: authData }), {
+      const userId = authData.user?.id;
+      if (userId) {
+        // Seed profiles row so role is persisted in the database
+        await supabase.from("profiles").upsert(
+          { id: userId, name: name ?? "", role: role ?? "student", bio: "" },
+          { onConflict: "id" }
+        );
+        // Seed users row (used by session history, earnings, world chat, etc.)
+        await supabase.from("users").upsert(
+          {
+            id: userId,
+            email,
+            name: name ?? "",
+            role: role ?? "student",
+            is_active: true,
+            last_login_at: new Date().toISOString(),
+          },
+          { onConflict: "id" }
+        );
+      }
+
+      return new Response(JSON.stringify({ success: true, user: authData.user }), {
         status: 200,
         headers: { "Content-Type": "application/json", ...corsHeaders },
       });

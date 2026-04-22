@@ -77,21 +77,18 @@ serve(async (req: Request) => {
     // Store OTP in database
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-    const {
-      data: { users },
-      error: listError,
-    } = await supabase.auth.admin.listUsers({
-      email,
-    });
-
+    // Check if email already registered
+    const { data: existingUsers, error: listError } = await supabase.auth.admin.listUsers();
     if (listError) {
       return new Response(JSON.stringify({ error: listError.message }), {
         status: 500,
         headers: { "Content-Type": "application/json", ...corsHeaders },
       });
     }
-
-    if (users && users.length > 0) {
+    const emailTaken = (existingUsers?.users ?? []).some(
+      (u: any) => u.email?.toLowerCase() === email.toLowerCase()
+    );
+    if (emailTaken) {
       return new Response(JSON.stringify({ error: "Email already registered" }), {
         status: 400,
         headers: { "Content-Type": "application/json", ...corsHeaders },

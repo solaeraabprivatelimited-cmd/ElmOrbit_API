@@ -1596,15 +1596,19 @@ async def list_rooms(
     """List active WebRTC rooms."""
     try:
         extract_user_id(authorization)
-        response = supabase.table("webrtc_rooms").select("*").eq(
-            "is_active", True
-        ).order("created_at", desc=True).execute()
-        return response.data or []
+        try:
+            response = supabase.table("webrtc_rooms").select(
+                "id,code,name,mode,subject,host_id,is_active,created_at,max_participants"
+            ).eq("is_active", True).order("created_at", desc=True).limit(50).execute()
+            return response.data or []
+        except Exception as db_err:
+            logger.warning(f"Room list DB error (returning empty): {db_err}")
+            return []
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Room list error: {e}")
-        raise HTTPException(status_code=500, detail="Failed to list rooms")
+        return []
 
 
 @app.get("/webrtc/rooms/{room_id}")
