@@ -1728,7 +1728,8 @@ async def join_room(
         for participant in (active_by_user.data or []):
             heartbeat = participant.get("last_heartbeat") or participant.get("joined_at")
             heartbeat_at = datetime.fromisoformat(str(heartbeat).replace("Z", "+00:00")) if heartbeat else now
-            if heartbeat_at < now - timedelta(seconds=40):
+            if heartbeat_at < now - timedelta(seconds=90):
+                # 90s = 3 missed heartbeat cycles — session is orphaned
                 stale_ids.append(participant["id"])
             else:
                 fresh_rows.append(participant)
@@ -1741,7 +1742,15 @@ async def join_room(
 
         same_room_session = next((p for p in fresh_rows if p.get("room_id") == room["id"]), None)
         if same_room_session:
-            raise HTTPException(status_code=409, detail="ALREADY_JOINED_THIS_ROOM")
+            # Idempotent re-join: user is already an active member of this room
+            # (e.g. creator auto-added at room creation, or a duplicate join call).
+            # Refresh heartbeat and return the existing participant row.
+            updated = supabase.table("webrtc_participants").update({
+                "last_heartbeat": now.isoformat(),
+                "connection_state": "connected",
+                "disconnected_at": None,
+            }).eq("id", same_room_session["id"]).execute()
+            return (updated.data or [same_room_session])[0]
 
         other_room_session = next((p for p in fresh_rows if p.get("room_id") != room["id"]), None)
         if other_room_session:
