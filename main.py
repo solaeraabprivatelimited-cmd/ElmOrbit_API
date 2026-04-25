@@ -1702,9 +1702,21 @@ async def join_room(
         sync_profile_row(supabase, user_id)
         
         room = resolve_room(supabase, room_id, "id,is_active,max_participants")
-        
+
         if not room["is_active"]:
-            raise HTTPException(status_code=410, detail="Room is closed")
+            # Room was put to sleep by the empty-room cleanup task.
+            # Reactivate it now that someone wants to join — rooms are only
+            # permanently gone when they don't exist at all (404 from resolve_room).
+            try:
+                supabase.table("webrtc_rooms").update({
+                    "is_active": True,
+                    "ends_at": None,
+                }).eq("id", room["id"]).execute()
+                room["is_active"] = True
+                logger.info(f"Reactivated room {room['id']} on join by {user_id}")
+            except Exception as reactivate_err:
+                logger.error(f"Failed to reactivate room {room['id']}: {reactivate_err}")
+                raise HTTPException(status_code=410, detail="Room is closed and could not be reactivated")
 
         active_by_user = supabase.table("webrtc_participants").select(
             "id,room_id,last_heartbeat,joined_at"
