@@ -1,8 +1,8 @@
--- ============================================================================
--- ELM ORBIT DATABASE SCHEMA
+﻿-- ============================================================================
+-- Elm Origin DATABASE SCHEMA
 -- ============================================================================
 -- Created: March 2026
--- This migration creates all core tables for the Elm Orbit learning platform
+-- This migration creates all core tables for the Elm Origin learning platform
 
 -- ============================================================================
 -- USERS & AUTHENTICATION

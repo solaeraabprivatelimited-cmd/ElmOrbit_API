@@ -1,4 +1,4 @@
-// @ts-nocheck
+﻿// @ts-nocheck
 // deno-lint-ignore-file no-explicit-any
 /// <reference lib="deno.window" />
 import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
@@ -21,7 +21,7 @@ async function sendOtp(email: string, otp: string): Promise<void> {
   const subject = "Your Two-Factor Authentication Code";
   const htmlContent = `
     <div style="font-family: Arial, sans-serif; color: #333;">
-      <h2>Elm Orbit Two-Factor Authentication</h2>
+      <h2>Elm Origin Two-Factor Authentication</h2>
       <p>Use this code to complete your login:</p>
       <div style="background: #f0f0f0; padding: 20px; border-radius: 8px; text-align: center;">
         <h1 style="letter-spacing: 4px; color: #003566;">${otp}</h1>
@@ -32,7 +32,7 @@ async function sendOtp(email: string, otp: string): Promise<void> {
   `;
 
   await sendEmail(email, subject, htmlContent, {
-    name: "Elm Orbit 2FA",
+    name: "Elm Origin 2FA",
     email: "onboarding@resend.dev",
   });
 }

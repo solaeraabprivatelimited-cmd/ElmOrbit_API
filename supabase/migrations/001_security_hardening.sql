@@ -1,6 +1,6 @@
--- ============================================================================
+﻿-- ============================================================================
 -- SECURITY UPGRADE MIGRATIONS
--- For: Elm Orbit Security Hardening Implementation
+-- For: Elm Origin Security Hardening Implementation
 -- Run in Supabase SQL Editor or via migration tool
 -- ============================================================================
 

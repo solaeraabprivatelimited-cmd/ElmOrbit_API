@@ -1,4 +1,4 @@
-// @ts-nocheck
+﻿// @ts-nocheck
 // deno-lint-ignore-file no-explicit-any
 /// <reference lib="deno.window" />
 import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
@@ -28,7 +28,7 @@ async function sendOtpViaEmail(recipientEmail: string, otp: string, name: string
 
   const htmlContent = `
     <div style="font-family: Arial, sans-serif; color: #333;">
-      <h2>Welcome to Elm Orbit, ${name}!</h2>
+      <h2>Welcome to Elm Origin, ${name}!</h2>
       <p>Use this code to verify your email:</p>
       <div style="background: #f0f0f0; padding: 20px; border-radius: 8px; text-align: center;">
         <h1 style="letter-spacing: 4px; color: #003566;">${otp}</h1>
@@ -92,7 +92,7 @@ async function sendOtpViaEmail(recipientEmail: string, otp: string, name: string
     console.log("DATA Response:", response);
 
     // Send email content
-    const emailMessage = `From: ${GMAIL_USER}\r\nTo: ${recipientEmail}\r\nSubject: Verify Your Email - Elm Orbit\r\nContent-Type: text/html; charset="UTF-8"\r\n\r\n${htmlContent}\r\n.`;
+    const emailMessage = `From: ${GMAIL_USER}\r\nTo: ${recipientEmail}\r\nSubject: Verify Your Email - Elm Origin\r\nContent-Type: text/html; charset="UTF-8"\r\n\r\n${htmlContent}\r\n.`;
     response = await sendCommand(emailMessage);
     console.log("Message Response:", response);
 
