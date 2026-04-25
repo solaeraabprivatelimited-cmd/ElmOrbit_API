@@ -36,7 +36,8 @@ import uuid
 import math
 import httpx
 from datetime import datetime, timedelta, timezone
-from typing import Optional, Dict, List, Set, Tuple, Any
+from typing import Optional, Dict, List, Set, Tuple, Any, Literal
+from contextlib import asynccontextmanager
 from enum import Enum
 from functools import wraps
 from collections import defaultdict, deque
@@ -692,7 +693,7 @@ class SkeletonSnapshot(BaseModel):
 # WebRTC Room Schemas
 class CreateRoomRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
-    mode: str = Field(default="collaborative")
+    mode: Literal["focus", "silent", "collaborative", "live"] = Field(default="collaborative")
     subject: Optional[str] = Field(None, max_length=255)
     description: Optional[str] = Field(None, max_length=1000)
     maxParticipants: int = Field(default=6, ge=2, le=20)
@@ -852,6 +853,17 @@ def get_allowed_origins() -> list:
 # FastAPI Application
 # ─────────────────────────────────────────────────────────────────────────────
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logger.info("🚀 Starting up Study Room Monitoring API...")
+    init_background_tasks()
+    logger.info("✅ Application startup complete")
+    yield
+    logger.info("🛑 Shutting down Study Room Monitoring API...")
+    shutdown_background_tasks()
+    logger.info("✅ Application shutdown complete")
+
+
 app = FastAPI(
     title="Study Room Monitoring API",
     description="Privacy-first monitoring system for study rooms",
@@ -859,6 +871,7 @@ app = FastAPI(
     docs_url=None,
     redoc_url=None,
     openapi_url=None,
+    lifespan=lifespan,
 )
 
 allowed_origins = get_allowed_origins()
@@ -1593,22 +1606,37 @@ async def list_rooms(
     authorization: Optional[str] = Header(None),
     supabase = Depends(get_supabase_client),
 ):
-    """List active WebRTC rooms."""
+    """List active WebRTC rooms with live participant counts."""
     try:
         extract_user_id(authorization)
-        try:
-            response = supabase.table("webrtc_rooms").select(
-                "id,code,name,mode,subject,host_id,is_active,created_at,max_participants"
-            ).eq("is_active", True).order("created_at", desc=True).limit(50).execute()
-            return response.data or []
-        except Exception as db_err:
-            logger.warning(f"Room list DB error (returning empty): {db_err}")
-            return []
+        response = supabase.table("webrtc_rooms").select(
+            "id,code,name,mode,subject,host_id,is_active,created_at,max_participants"
+        ).eq("is_active", True).order("created_at", desc=True).limit(50).execute()
+        rooms = response.data or []
+
+        if rooms:
+            room_ids = [r["id"] for r in rooms]
+            try:
+                count_resp = supabase.table("webrtc_participants").select(
+                    "room_id"
+                ).in_("room_id", room_ids).is_("disconnected_at", "null").execute()
+                counts: Dict[str, int] = {}
+                for p in (count_resp.data or []):
+                    rid = p["room_id"]
+                    counts[rid] = counts.get(rid, 0) + 1
+                for room in rooms:
+                    room["participant_count"] = counts.get(room["id"], 0)
+            except Exception as count_err:
+                logger.warning(f"Participant count enrichment failed: {count_err}")
+                for room in rooms:
+                    room["participant_count"] = 0
+
+        return rooms
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Room list error: {e}")
-        return []
+        raise HTTPException(status_code=500, detail="Failed to fetch rooms")
 
 
 @app.get("/webrtc/rooms/{room_id}")
@@ -2379,23 +2407,8 @@ async def ai_mentor_stream(
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# SECTION 12: STARTUP & SHUTDOWN EVENTS
+# SECTION 12: LIFESPAN (startup/shutdown handled via asynccontextmanager above)
 # ═══════════════════════════════════════════════════════════════════════════════
-
-@app.on_event("startup")
-async def startup_event():
-    """Application startup"""
-    logger.info("🚀 Starting up Study Room Monitoring API...")
-    init_background_tasks()
-    logger.info("✅ Application startup complete")
-
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Application shutdown"""
-    logger.info("🛑 Shutting down Study Room Monitoring API...")
-    shutdown_background_tasks()
-    logger.info("✅ Application shutdown complete")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
