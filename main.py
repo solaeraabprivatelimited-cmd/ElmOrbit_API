@@ -49,7 +49,7 @@ from fastapi import (
     FastAPI, APIRouter, HTTPException, Depends, Header, Query, Request,
     WebSocket, File, UploadFile
 )
-from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.responses import StreamingResponse, JSONResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, EmailStr, validator, root_validator
 from dotenv import load_dotenv
@@ -603,26 +603,55 @@ class BackgroundTaskManager:
             logger.info("✓ Background task scheduler stopped")
     
     def cleanup_empty_rooms(self):
-        """Clean up empty rooms (synchronous — called by BackgroundScheduler)"""
+        """Close rooms where all participants have disconnected (synchronous — called by BackgroundScheduler)."""
         try:
             client = get_supabase_client()
-            response = client.rpc('cleanup_empty_rooms').execute()
-            deleted_count = response.data[0]['deleted_count'] if response.data else 0
 
-            if deleted_count > 0:
-                logger.info(f"✓ Cleanup: Deleted {deleted_count} empty rooms")
+            # Find all rooms that are still marked active
+            active_resp = client.table("webrtc_rooms").select(
+                "id"
+            ).eq("is_active", True).execute()
+            active_rooms = active_resp.data or []
+
+            if not active_rooms:
+                return {"status": "success", "closed_count": 0, "timestamp": datetime.now(timezone.utc).isoformat()}
+
+            active_ids = [r["id"] for r in active_rooms]
+
+            # Among those, find rooms that still have at least one connected participant
+            live_resp = client.table("webrtc_participants").select(
+                "room_id"
+            ).in_("room_id", active_ids).is_("disconnected_at", "null").execute()
+            live_room_ids = {p["room_id"] for p in (live_resp.data or [])}
+
+            # Rooms with no live participants should be closed
+            empty_ids = [rid for rid in active_ids if rid not in live_room_ids]
+
+            closed_count = 0
+            for room_id in empty_ids:
+                try:
+                    client.table("webrtc_rooms").update({
+                        "is_active": False,
+                        "ends_at": datetime.now(timezone.utc).isoformat(),
+                    }).eq("id", room_id).execute()
+                    closed_count += 1
+                except Exception as room_err:
+                    logger.warning(f"Could not close room {room_id}: {room_err}")
+
+            if closed_count > 0:
+                logger.info(f"✓ Cleanup: Closed {closed_count} empty room(s)")
 
             return {
                 "status": "success",
-                "deleted_count": deleted_count,
-                "timestamp": datetime.now(timezone.utc).isoformat()
+                "closed_count": closed_count,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             }
         except Exception as e:
             logger.error(f"✗ Room cleanup failed: {str(e)}")
             return {
                 "status": "error",
                 "error": str(e),
-                "timestamp": datetime.now(timezone.utc).isoformat()
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             }
 
     def mark_room_empty(self, room_id: str) -> bool:
@@ -1599,6 +1628,12 @@ async def create_room(
     except Exception as e:
         logger.error(f"Room creation error: {e}")
         raise HTTPException(status_code=500, detail="Failed to create room")
+
+
+@app.head("/webrtc/rooms")
+async def head_rooms(authorization: Optional[str] = Header(None)):
+    """HEAD handler so health probes / preflight checks don't receive 405."""
+    return Response(status_code=200)
 
 
 @app.get("/webrtc/rooms")
