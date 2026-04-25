@@ -15,10 +15,7 @@ services:
     dockerContext: .
 
     # Environment Variables
-    # ⚠️ IMPORTANT: Set these REQUIRED SECRET values in Render Dashboard, not here
-    # 1. GROQ_API_KEY - Get from https://console.groq.com
-    # 2. SUPABASE_SERVICE_ROLE_KEY - From Supabase dashboard
-    # 3. SUPABASE_ANON_KEY - From Supabase dashboard (public key is safe here)
+    # Set SUPABASE_SERVICE_ROLE_KEY, SUPABASE_ANON_KEY, GROQ_API_KEY, JWT_SECRET_KEY in Render Dashboard
     envVars:
       - key: SUPABASE_URL
         value: https://evtvzmherkrahjsxdddi.supabase.co
@@ -28,12 +25,18 @@ services:
         sync: false
       - key: GROQ_API_KEY
         sync: false
+      - key: JWT_SECRET_KEY
+        sync: false
+      - key: JWT_ALGORITHM
+        value: HS256
       - key: CORS_ORIGINS
         value: https://lernova-alpha.vercel.app,https://app.elmorbit.co.in,http://localhost:5173
       - key: PORT
         value: "8000"
+      - key: ENVIRONMENT
+        value: production
 
-    # Health Check (UptimeRobot will monitor this)
+    # Health Check
     healthCheckPath: /health
     healthCheckInterval: 30
 

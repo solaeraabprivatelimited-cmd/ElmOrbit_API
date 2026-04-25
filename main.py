@@ -92,7 +92,7 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 
 # Import error handling infrastructure
-from error_handler import register_error_handlers, AppError, ErrorCode
+from error_handler import register_error_handlers, AppError
 
 # Import notification service for multi-channel alerts
 try:
@@ -601,45 +601,45 @@ class BackgroundTaskManager:
             self.is_running = False
             logger.info("✓ Background task scheduler stopped")
     
-    async def cleanup_empty_rooms(self):
-        """Clean up empty rooms"""
+    def cleanup_empty_rooms(self):
+        """Clean up empty rooms (synchronous — called by BackgroundScheduler)"""
         try:
             client = get_supabase_client()
             response = client.rpc('cleanup_empty_rooms').execute()
             deleted_count = response.data[0]['deleted_count'] if response.data else 0
-            
+
             if deleted_count > 0:
                 logger.info(f"✓ Cleanup: Deleted {deleted_count} empty rooms")
-            
+
             return {
                 "status": "success",
                 "deleted_count": deleted_count,
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": datetime.now(timezone.utc).isoformat()
             }
         except Exception as e:
             logger.error(f"✗ Room cleanup failed: {str(e)}")
             return {
                 "status": "error",
                 "error": str(e),
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": datetime.now(timezone.utc).isoformat()
             }
-    
-    async def mark_room_empty(self, room_id: str) -> bool:
-        """Mark room as empty"""
+
+    def mark_room_empty(self, room_id: str) -> bool:
+        """Mark room as empty (synchronous — called by BackgroundScheduler)"""
         try:
             client = get_supabase_client()
             response = client.table('webrtc_participants').select('id').eq(
                 'room_id', room_id
-            ).is_('left_at', True).execute()
-            
+            ).is_('disconnected_at', 'null').execute()
+
             if not response.data or len(response.data) == 0:
                 client.table('webrtc_rooms').update({
-                    'emptied_at': datetime.utcnow().isoformat()
+                    'emptied_at': datetime.now(timezone.utc).isoformat()
                 }).eq('id', room_id).execute()
-                
+
                 logger.info(f"✓ Marked room {room_id} as empty")
                 return True
-            
+
             return False
         except Exception as e:
             logger.error(f"✗ Failed to mark room empty: {e}")
@@ -802,7 +802,7 @@ def make_error_response(
             "code": code,
             "message": message,
             "details": details or {},
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         },
     }
     if request_id:
@@ -1480,7 +1480,7 @@ async def create_monitoring_session(
             "room_id": data.room_id,
             "user_id": user_id,
             "session_name": data.session_name,
-            "started_at": datetime.utcnow().isoformat(),
+            "started_at": datetime.now(timezone.utc).isoformat(),
         }).execute()
         return {"success": True, "session_id": response.data[0]["id"] if response.data else None}
     except Exception as e:
@@ -1506,7 +1506,7 @@ async def log_monitoring_event(
             "anomaly_score": event.anomaly_score,
             "event_data": event.event_data,
             "logged_by": user_id,
-            "created_at": datetime.utcnow().isoformat(),
+            "created_at": datetime.now(timezone.utc).isoformat(),
         }).execute()
         return {"success": True}
     except Exception as e:
@@ -1531,7 +1531,7 @@ async def save_skeleton_snapshot(
             "velocity": snapshot.velocity,
             "is_standing": snapshot.is_standing,
             "is_idle": snapshot.is_idle,
-            "captured_at": datetime.utcnow().isoformat(),
+            "captured_at": datetime.now(timezone.utc).isoformat(),
         }).execute()
         return {"success": True}
     except Exception as e:
@@ -1647,7 +1647,7 @@ async def join_room(
             "id,room_id,last_heartbeat,joined_at"
         ).eq("user_id", user_id).is_("disconnected_at", "null").execute()
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         stale_ids = []
         fresh_rows = []
         for participant in (active_by_user.data or []):
@@ -1724,7 +1724,7 @@ async def leave_room(
         
         if response.data:
             supabase.table("webrtc_participants").update({
-                "disconnected_at": datetime.utcnow().isoformat(),
+                "disconnected_at": datetime.now(timezone.utc).isoformat(),
                 "connection_state": "disconnected",
             }).eq("id", response.data[0]["id"]).execute()
         
@@ -1751,7 +1751,7 @@ async def close_room(
 
         supabase.table("webrtc_rooms").update({
             "is_active": False,
-            "closed_at": datetime.utcnow().isoformat(),
+            "closed_at": datetime.now(timezone.utc).isoformat(),
             "updated_by": user_id,
         }).eq("id", room["id"]).execute()
         return {"success": True, "message": "Room closed"}
@@ -1791,7 +1791,7 @@ async def update_room_participant(
         if "is_video_off" in updates and "is_video_enabled" not in normalized_updates:
             normalized_updates["is_video_enabled"] = not bool(updates["is_video_off"])
         normalized_updates["last_heartbeat"] = normalized_updates.get(
-            "last_heartbeat", datetime.utcnow().isoformat()
+            "last_heartbeat", datetime.now(timezone.utc).isoformat()
         )
 
         response = supabase.table("webrtc_participants").update(
@@ -1843,7 +1843,7 @@ async def post_room_chat(
             "room_id": canonical_room_id,
             "sender_user_id": user_id,
             "message": request.message.strip(),
-            "created_at": datetime.utcnow().isoformat(),
+            "created_at": datetime.now(timezone.utc).isoformat(),
         }).execute()
         
         logger.info(f"Message posted to room {canonical_room_id}")
@@ -1903,7 +1903,7 @@ async def save_my_room_note(
             "room_id": canonical_room_id,
             "user_id": user_id,
             "content": request.content,
-            "updated_at": datetime.utcnow().isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
         }, on_conflict="room_id,user_id").execute()
 
         return (response.data or [{"success": True}])[0]
@@ -1953,7 +1953,7 @@ async def create_room_note_entry(
             "user_id": user_id,
             "heading": request.heading.strip() or "Untitled note",
             "body": request.body,
-            "updated_at": datetime.utcnow().isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
         }).execute()
         return (response.data or [None])[0]
     except HTTPException:
@@ -1978,7 +1978,7 @@ async def update_room_note_entry(
         response = supabase.table("webrtc_room_note_entries").update({
             "heading": request.heading.strip() or "Untitled note",
             "body": request.body,
-            "updated_at": datetime.utcnow().isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
         }).eq("id", note_id).eq("room_id", canonical_room_id).eq("user_id", user_id).execute()
         note = response.data[0] if response.data else None
         if not note:
@@ -2068,7 +2068,7 @@ async def get_webrtc_signals(
         if signal_ids:
             supabase.table("webrtc_signaling").update({
                 "was_processed": True,
-                "processed_at": datetime.utcnow().isoformat(),
+                "processed_at": datetime.now(timezone.utc).isoformat(),
             }).in_("id", signal_ids).execute()
 
         return response.data or []
@@ -2150,7 +2150,7 @@ async def update_participant_state(
         user_id = extract_user_id(authorization)
         
         supabase.table("webrtc_participants").update(
-            {**state, "last_state_change": datetime.utcnow().isoformat()}
+            {**state, "last_state_change": datetime.now(timezone.utc).isoformat()}
         ).eq("room_id", room_id).eq("user_id", user_id).execute()
         
         return {"success": True}
@@ -2174,7 +2174,7 @@ async def send_reaction(
             "room_id": room_id,
             "user_id": user_id,
             "reaction_type": reaction.get("reaction_type"),
-            "created_at": datetime.utcnow().isoformat(),
+            "created_at": datetime.now(timezone.utc).isoformat(),
         }).execute()
         
         return {"success": True}
@@ -2294,7 +2294,7 @@ async def ai_mentor_chat(
             
             return AiMentorResponse(
                 response=response_text,
-                timestamp=datetime.utcnow().isoformat()
+                timestamp=datetime.now(timezone.utc).isoformat()
             )
         
         except Exception as groq_error:
@@ -2306,7 +2306,7 @@ async def ai_mentor_chat(
             )
             return AiMentorResponse(
                 response=fallback_message,
-                timestamp=datetime.utcnow().isoformat()
+                timestamp=datetime.now(timezone.utc).isoformat()
             )
     
     except HTTPException:

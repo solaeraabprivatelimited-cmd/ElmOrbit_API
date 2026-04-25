@@ -5,7 +5,7 @@ Standardizes all error responses across the API
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
-from datetime import datetime
+from datetime import datetime, timezone
 import uuid
 from enum import Enum
 from typing import Optional, Dict, Any
@@ -99,7 +99,7 @@ class AppError(Exception):
         self.status_code = status_code or HTTP_STATUS_CODES.get(code, 500)
         self.details = details or {}
         self.error_id = str(uuid.uuid4()).replace('-', '')[:12]
-        self.timestamp = datetime.utcnow().isoformat() + 'Z'
+        self.timestamp = datetime.now(timezone.utc).isoformat()
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert error to response dictionary"""

@@ -15,7 +15,7 @@ import httpx
 import logging
 from typing import Optional, List, Dict, Any
 from enum import Enum
-from datetime import datetime
+from datetime import datetime, timezone
 from pydantic import BaseModel, EmailStr
 
 logger = logging.getLogger(__name__)
@@ -49,7 +49,7 @@ class AlertPayload(BaseModel):
     def __init__(self, **data):
         super().__init__(**data)
         if self.timestamp is None:
-            self.timestamp = datetime.utcnow().isoformat()
+            self.timestamp = datetime.now(timezone.utc).isoformat()
 
 
 class NotificationResult(BaseModel):
@@ -203,7 +203,7 @@ class NotificationService:
                     "timestamp": alert.timestamp,
                 },
                 "metadata": {
-                    "sent_at": datetime.utcnow().isoformat(),
+                    "sent_at": datetime.now(timezone.utc).isoformat(),
                     "version": "1.0",
                 },
             }
