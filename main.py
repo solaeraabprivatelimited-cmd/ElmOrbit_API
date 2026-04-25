@@ -1254,7 +1254,7 @@ async def health_check(request: Request):
     try:
         return {
             "status": "healthy",
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "version": "1.0.0",
             "request_id": request.state.request_id
         }
@@ -1358,7 +1358,7 @@ async def process_frame(room_id: str, file: UploadFile = File(...), request: Req
             "room_id": room_id,
             "occupancy": result["occupancy_count"],
             "events": result["events"],
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat()
         }
     except HTTPException:
         raise
@@ -1392,7 +1392,7 @@ async def websocket_monitoring(websocket: WebSocket, room_id: str):
                 "room_id": room_id,
                 "occupancy": status["occupancy"],
                 "events": status["events"],
-                "timestamp": datetime.now().isoformat()
+                "timestamp": datetime.now(timezone.utc).isoformat()
             })
             
             await asyncio.sleep(2)
@@ -1417,7 +1417,7 @@ async def get_room_status(room_id: str):
             "success": True,
             "room_id": room_id,
             "status": status,
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat()
         }
     except Exception as e:
         logger.error(f"Error getting room status: {str(e)}")
@@ -1482,7 +1482,7 @@ async def broadcast_event(room_id: str, event: dict):
     payload = {
         "room_id": room_id,
         "event": event,
-        "timestamp": datetime.now().isoformat()
+        "timestamp": datetime.now(timezone.utc).isoformat()
     }
     
     for connection in active_connections:
@@ -1501,7 +1501,7 @@ async def get_system_stats():
         "total_rooms_monitored": len(monitoring_engines),
         "active_connections": len(active_connections),
         "rooms": list(monitoring_engines.keys()),
-        "timestamp": datetime.now().isoformat()
+        "timestamp": datetime.now(timezone.utc).isoformat()
     }
 
 
@@ -1715,7 +1715,7 @@ async def join_room(
         fresh_rows = []
         for participant in (active_by_user.data or []):
             heartbeat = participant.get("last_heartbeat") or participant.get("joined_at")
-            heartbeat_at = datetime.fromisoformat(str(heartbeat).replace("Z", "+00:00")).replace(tzinfo=None) if heartbeat else now
+            heartbeat_at = datetime.fromisoformat(str(heartbeat).replace("Z", "+00:00")) if heartbeat else now
             if heartbeat_at < now - timedelta(seconds=40):
                 stale_ids.append(participant["id"])
             else:
