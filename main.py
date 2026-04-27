@@ -1162,6 +1162,44 @@ def sync_profile_row(supabase, user_id: str):
         logger.warning(f"Profile sync skipped for {user_id}: {e}")
 
 
+def get_fresh_active_participants_for_user(
+    supabase,
+    user_id: str,
+    *,
+    now: Optional[datetime] = None,
+    stale_after_seconds: int = 90,
+) -> List[dict]:
+    """Return active participant rows after disconnecting orphaned sessions."""
+    now = now or datetime.now(timezone.utc)
+    active_by_user = supabase.table("webrtc_participants").select(
+        "id,room_id,last_heartbeat,joined_at"
+    ).eq("user_id", user_id).is_("disconnected_at", "null").execute()
+
+    stale_ids: List[str] = []
+    fresh_rows: List[dict] = []
+    stale_cutoff = now - timedelta(seconds=stale_after_seconds)
+
+    for participant in (active_by_user.data or []):
+        heartbeat = participant.get("last_heartbeat") or participant.get("joined_at")
+        heartbeat_at = (
+            datetime.fromisoformat(str(heartbeat).replace("Z", "+00:00"))
+            if heartbeat
+            else now
+        )
+        if heartbeat_at < stale_cutoff:
+            stale_ids.append(participant["id"])
+        else:
+            fresh_rows.append(participant)
+
+    if stale_ids:
+        supabase.table("webrtc_participants").update({
+            "disconnected_at": now.isoformat(),
+            "connection_state": "disconnected",
+        }).in_("id", stale_ids).execute()
+
+    return fresh_rows
+
+
 def get_room_with_participants(supabase, room_identifier: str) -> dict:
     room = resolve_room(supabase, room_identifier)
     participant_response = supabase.table("webrtc_participants").select(
@@ -1595,6 +1633,11 @@ async def create_room(
     try:
         user_id = extract_user_id(authorization)
         sync_profile_row(supabase, user_id)
+        now = datetime.now(timezone.utc)
+        fresh_rows = get_fresh_active_participants_for_user(supabase, user_id, now=now)
+        if fresh_rows:
+            raise HTTPException(status_code=409, detail="ALREADY_IN_ANOTHER_ROOM")
+
         room_code = generate_room_code()
         
         response = supabase.table("webrtc_rooms").insert({
@@ -1618,6 +1661,7 @@ async def create_room(
             "user_id": user_id,
             "permissions": "host",
             "connection_state": "connecting",
+            "last_heartbeat": now.isoformat(),
         }).execute()
         
         logger.info(f"Room created: {room['id']} by {user_id}")
@@ -1718,27 +1762,8 @@ async def join_room(
                 logger.error(f"Failed to reactivate room {room['id']}: {reactivate_err}")
                 raise HTTPException(status_code=410, detail="Room is closed and could not be reactivated")
 
-        active_by_user = supabase.table("webrtc_participants").select(
-            "id,room_id,last_heartbeat,joined_at"
-        ).eq("user_id", user_id).is_("disconnected_at", "null").execute()
-
         now = datetime.now(timezone.utc)
-        stale_ids = []
-        fresh_rows = []
-        for participant in (active_by_user.data or []):
-            heartbeat = participant.get("last_heartbeat") or participant.get("joined_at")
-            heartbeat_at = datetime.fromisoformat(str(heartbeat).replace("Z", "+00:00")) if heartbeat else now
-            if heartbeat_at < now - timedelta(seconds=90):
-                # 90s = 3 missed heartbeat cycles — session is orphaned
-                stale_ids.append(participant["id"])
-            else:
-                fresh_rows.append(participant)
-
-        if stale_ids:
-            supabase.table("webrtc_participants").update({
-                "disconnected_at": now.isoformat(),
-                "connection_state": "disconnected",
-            }).in_("id", stale_ids).execute()
+        fresh_rows = get_fresh_active_participants_for_user(supabase, user_id, now=now)
 
         same_room_session = next((p for p in fresh_rows if p.get("room_id") == room["id"]), None)
         if same_room_session:
@@ -1803,14 +1828,12 @@ async def leave_room(
     try:
         user_id = extract_user_id(authorization)
         room = resolve_room(supabase, room_id, "id")
-        
-        response = supabase.table("webrtc_participants").select("id").eq("room_id", room["id"]).eq("user_id", user_id).execute()
-        
-        if response.data:
-            supabase.table("webrtc_participants").update({
-                "disconnected_at": datetime.now(timezone.utc).isoformat(),
-                "connection_state": "disconnected",
-            }).eq("id", response.data[0]["id"]).execute()
+        now = datetime.now(timezone.utc).isoformat()
+
+        supabase.table("webrtc_participants").update({
+            "disconnected_at": now,
+            "connection_state": "disconnected",
+        }).eq("room_id", room["id"]).eq("user_id", user_id).is_("disconnected_at", "null").execute()
         
         logger.info(f"User {user_id} left room {room['id']}")
         return {"success": True}
