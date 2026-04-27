@@ -2333,10 +2333,19 @@ def get_groq_client():
     return _groq_client
 
 
+def resolve_ai_mentor_type(request: AiMentorRequest, query_type: Optional[str]) -> str:
+    resolved = (query_type or request.type or "explanation").strip().lower()
+    if resolved in {"mood-checkin", "mood_checkin", "mood"}:
+        return "mood-checkin"
+    if resolved in {"explanation", "explain", "tutoring"}:
+        return "explanation"
+    return resolved
+
+
 @app.post("/api/ai-mentor/chat", response_model=AiMentorResponse)
 async def ai_mentor_chat(
     request: AiMentorRequest,
-    query_type: str = Query("explanation", description="Type of AI response"),
+    query_type: Optional[str] = Query(None, alias="type", description="Type of AI response"),
     stream: bool = Query(False, description="Stream the response"),
 ):
     """AI Mentor Chat Endpoint - Get responses from Groq LLM"""
@@ -2348,14 +2357,16 @@ async def ai_mentor_chat(
                 detail="AI mentor service unavailable - Groq API not configured"
             )
         
+        effective_type = resolve_ai_mentor_type(request, query_type)
+
         # Build system prompt based on type
-        if query_type == "mood-checkin":
+        if effective_type == "mood-checkin":
             system_prompt = (
                 "You are an empathetic AI wellness assistant. Help the student reflect on their emotional state. "
                 "Ask clarifying questions, validate their feelings, and suggest healthy coping strategies. "
                 "Keep responses brief and supportive."
             )
-        elif query_type == "explanation":
+        elif effective_type == "explanation":
             system_prompt = (
                 "You are an expert educational tutor. Explain concepts clearly and concisely. "
                 "Break down complex topics into simple steps. Provide examples when helpful. "
@@ -2391,7 +2402,7 @@ async def ai_mentor_chat(
         # Call Groq API
         try:
             completion = groq.chat.completions.create(
-                model="llama-3.1-8b-instant",  # Fast, lightweight model for real-time chat
+                model=os.getenv("GROQ_MODEL", "llama-3.1-8b-instant"),
                 messages=messages,
                 max_tokens=1024,
                 temperature=0.7,
@@ -2405,15 +2416,10 @@ async def ai_mentor_chat(
             )
         
         except Exception as groq_error:
-            logger.error(f"Groq API error: {groq_error}")
-            # Provide fallback response
-            fallback_message = (
-                "I apologize, but I'm having trouble processing your request right now. "
-                "Please try again in a moment, or rephrase your question."
-            )
-            return AiMentorResponse(
-                response=fallback_message,
-                timestamp=datetime.now(timezone.utc).isoformat()
+            logger.error(f"Groq API error for type={effective_type}: {groq_error}")
+            raise HTTPException(
+                status_code=502,
+                detail="AI mentor provider request failed"
             )
     
     except HTTPException:
@@ -2429,7 +2435,7 @@ async def ai_mentor_chat(
 @app.post("/api/ai-mentor/stream")
 async def ai_mentor_stream(
     request: AiMentorRequest,
-    query_type: str = Query("explanation"),
+    query_type: Optional[str] = Query(None, alias="type"),
 ):
     """Streaming version of AI mentor chat"""
     async def generate():
@@ -2439,13 +2445,15 @@ async def ai_mentor_stream(
                 yield '{"error": "AI mentor service unavailable"}\n'
                 return
             
+            effective_type = resolve_ai_mentor_type(request, query_type)
+
             # Build system prompt
-            if query_type == "mood-checkin":
+            if effective_type == "mood-checkin":
                 system_prompt = (
                     "You are an empathetic AI wellness assistant. Help the student reflect on their emotional state. "
                     "Keep responses brief and supportive."
                 )
-            elif query_type == "explanation":
+            elif effective_type == "explanation":
                 system_prompt = (
                     "You are an expert educational tutor. Explain concepts clearly and concisely. "
                     "Break down complex topics into simple steps."
@@ -2467,7 +2475,7 @@ async def ai_mentor_stream(
             
             # Stream from Groq
             completion = groq.chat.completions.create(
-                model="llama-3.1-8b-instant",
+                model=os.getenv("GROQ_MODEL", "llama-3.1-8b-instant"),
                 messages=messages,
                 max_tokens=1024,
                 temperature=0.7,
