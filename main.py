@@ -726,6 +726,7 @@ class CreateRoomRequest(BaseModel):
     subject: Optional[str] = Field(None, max_length=255)
     description: Optional[str] = Field(None, max_length=1000)
     maxParticipants: int = Field(default=6, ge=2, le=20)
+    visibility: Literal["private", "public"] = Field(default="private")
 
 
 class Room(BaseModel):
@@ -1648,6 +1649,7 @@ async def create_room(
             "subject": request.subject,
             "description": request.description,
             "max_participants": request.maxParticipants,
+            "is_private": request.visibility == "private",
             "is_active": True,
             "created_by": user_id,
         }).execute()
@@ -1689,8 +1691,8 @@ async def list_rooms(
     try:
         extract_user_id(authorization)
         response = supabase.table("webrtc_rooms").select(
-            "id,code,name,mode,subject,host_id,is_active,created_at,max_participants"
-        ).eq("is_active", True).order("created_at", desc=True).limit(50).execute()
+            "id,code,name,mode,subject,host_id,is_active,created_at,max_participants,is_private"
+        ).eq("is_active", True).eq("is_private", False).order("created_at", desc=True).limit(50).execute()
         rooms = response.data or []
 
         if rooms:
@@ -2193,6 +2195,8 @@ async def get_webrtc_signals(
 @app.get("/mentors/browse")
 async def browse_mentors(
     subject: Optional[str] = Query(None),
+    min_rating: Optional[float] = Query(None, ge=0, le=5),
+    max_rate: Optional[float] = Query(None, ge=0),
     skip: int = Query(0, ge=0),
     limit: int = Query(10, ge=1, le=100),
     authorization: Optional[str] = Header(None),
@@ -2201,8 +2205,68 @@ async def browse_mentors(
     """Browse mentors"""
     try:
         extract_user_id(authorization)
-        response = supabase.table("mentor_profiles").select("*").order("avg_rating", desc=True).offset(skip).limit(limit).execute()
-        return response.data or []
+        response = supabase.table("mentor_profiles").select("*").execute()
+        mentor_profiles = response.data or []
+
+        mentor_ids = [row.get("user_id") for row in mentor_profiles if row.get("user_id")]
+        profiles_by_id: Dict[str, Dict[str, Any]] = {}
+        if mentor_ids:
+            try:
+                profiles_response = supabase.table("profiles").select(
+                    "id,name,avatar_url,role,bio,expertise,education_details,qualifications"
+                ).in_("id", mentor_ids).execute()
+                profiles_by_id = {row["id"]: row for row in (profiles_response.data or [])}
+            except Exception as profile_err:
+                logger.warning(f"Mentor profile enrichment skipped: {profile_err}")
+
+        normalized = []
+        for row in mentor_profiles:
+            user_id = row.get("user_id")
+            profile = profiles_by_id.get(user_id, {})
+            subjects = row.get("subjects") or row.get("specializations") or []
+            if not isinstance(subjects, list):
+                subjects = [str(subjects)] if subjects else []
+
+            qualifications = row.get("qualifications") or profile.get("qualifications") or []
+            if not isinstance(qualifications, list):
+                qualifications = [str(qualifications)] if qualifications else []
+
+            rating = row.get("avg_rating", row.get("rating", 0)) or 0
+            hourly_rate = row.get("hourly_rate") or 0
+            try:
+                rating_value = float(rating)
+            except (TypeError, ValueError):
+                rating_value = 0
+            try:
+                rate_value = float(hourly_rate)
+            except (TypeError, ValueError):
+                rate_value = 0
+
+            if subject and subject.lower() not in " ".join(subjects).lower():
+                continue
+            if min_rating is not None and rating_value < min_rating:
+                continue
+            if max_rate is not None and rate_value > max_rate:
+                continue
+
+            normalized.append({
+                "id": row.get("id") or user_id,
+                "userId": user_id,
+                "name": profile.get("name") or row.get("name") or "Mentor",
+                "avatarUrl": profile.get("avatar_url"),
+                "bio": row.get("bio") or profile.get("bio") or "",
+                "educationDetails": row.get("education_details") or profile.get("education_details") or "",
+                "qualifications": qualifications,
+                "hourlyRate": rate_value,
+                "subjects": subjects,
+                "avgRating": rating_value,
+                "totalSessions": int(row.get("total_sessions", row.get("session_count", 0)) or 0),
+                "isVerified": bool(row.get("is_verified", row.get("verified", False))),
+                "responseTimeHours": int(row.get("response_time_hours", 24) or 24),
+            })
+
+        normalized.sort(key=lambda item: item["avgRating"], reverse=True)
+        return normalized[skip:skip + limit]
     except Exception as e:
         logger.error(f"Browse mentors error: {e}")
         raise HTTPException(status_code=500, detail="Failed to fetch mentors")
