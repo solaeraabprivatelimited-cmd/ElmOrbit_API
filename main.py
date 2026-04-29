@@ -2311,25 +2311,26 @@ _groq_client = None
 
 
 def get_groq_client():
-    """Get or initialize Groq client"""
+    """Get or initialize Groq client. Always re-reads the API key so Render
+    environment variable changes take effect without a redeploy."""
     global _groq_client
+    # Re-initialize if key changes or client was never set
+    groq_api_key = os.getenv("GROQ_API_KEY")
+    if not groq_api_key:
+        logger.warning("⚠️ GROQ_API_KEY not set - AI mentor features disabled")
+        _groq_client = None
+        return None
     if _groq_client is None:
         try:
             from groq import Groq
-            groq_api_key = os.getenv("GROQ_API_KEY")
-            if not groq_api_key:
-                logger.warning("⚠️ GROQ_API_KEY not set - AI mentor features disabled")
-                return None
-            
             _groq_client = Groq(api_key=groq_api_key)
-            logger.info("✅ Groq client initialized")
+            logger.info("✅ Groq client initialized (model=%s)", os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"))
         except ImportError:
             logger.warning("⚠️ Groq SDK not installed - Install with: pip install groq")
             return None
         except Exception as e:
             logger.error(f"✗ Failed to initialize Groq client: {e}")
             return None
-    
     return _groq_client
 
 
@@ -2402,24 +2403,26 @@ async def ai_mentor_chat(
         # Call Groq API
         try:
             completion = groq.chat.completions.create(
-                model=os.getenv("GROQ_MODEL", "llama-3.1-8b-instant"),
+                model=os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"),
                 messages=messages,
                 max_tokens=1024,
                 temperature=0.7,
             )
-            
-            response_text = completion.choices[0].message.content
-            
+
+            response_text = (completion.choices[0].message.content or "").strip()
+            if not response_text:
+                raise ValueError("Empty response from AI model")
+
             return AiMentorResponse(
                 response=response_text,
                 timestamp=datetime.now(timezone.utc).isoformat()
             )
-        
+
         except Exception as groq_error:
             logger.error(f"Groq API error for type={effective_type}: {groq_error}")
             raise HTTPException(
                 status_code=502,
-                detail="AI mentor provider request failed"
+                detail=f"AI mentor provider request failed: {groq_error}"
             )
     
     except HTTPException:
@@ -2475,7 +2478,7 @@ async def ai_mentor_stream(
             
             # Stream from Groq
             completion = groq.chat.completions.create(
-                model=os.getenv("GROQ_MODEL", "llama-3.1-8b-instant"),
+                model=os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"),
                 messages=messages,
                 max_tokens=1024,
                 temperature=0.7,
